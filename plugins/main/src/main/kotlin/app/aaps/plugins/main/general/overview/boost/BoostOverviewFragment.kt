@@ -32,6 +32,8 @@ import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
+import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
 import app.aaps.core.interfaces.rx.bus.RxBus
@@ -120,6 +122,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
     @Inject lateinit var decimalFormatter: DecimalFormatter
     @Inject lateinit var graphDataProvider: Provider<GraphData>
     @Inject lateinit var boostHelper: BoostOverviewHelper
+    @Inject lateinit var commandQueue: CommandQueue
     @Inject lateinit var dexcomBoyda: DexcomBoyda
     @Inject lateinit var xDripSource: XDripSource
     @Inject lateinit var uel: UserEntryLogger
@@ -222,6 +225,9 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         binding.panelTarget.setOnClickListener(this)
         binding.panelActivity.setOnClickListener(this)
 
+        // Pump status bar — tap to show bolus progress dialog
+        binding.pumpStatusLayout.setOnClickListener(this)
+
         // Standard AAPS button click listeners (from overview_buttons_layout include)
         binding.buttonsLayout.acceptTempButton.setOnClickListener(this)
         binding.buttonsLayout.treatmentButton.setOnClickListener(this)
@@ -298,11 +304,14 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         disposable += rxBus
             .toObservable(EventTempTargetChange::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
+            .subscribe({ updateSecondRow() }, fabricPrivacy::logException)
         disposable += rxBus
             .toObservable(EventRunningModeChange::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe({ updateLoopIcon() }, fabricPrivacy::logException)
+            .subscribe({
+                updateLoopIcon()
+                runOnUiThread { processButtonsVisibility() }
+            }, fabricPrivacy::logException)
         disposable += rxBus
             .toObservable(EventInitializationChanged::class.java)
             .observeOn(aapsSchedulers.main)
@@ -323,6 +332,9 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         refreshLoop = Runnable { refreshAll(); handler.postDelayed(refreshLoop, 60_000L) }
         handler.postDelayed(refreshLoop, 60_000L)
         handler.post { refreshAll() }
+        updatePumpStatus()
+        updateCalcProgress()
+        popupBolusDialogIfRunning(onClick = false)
     }
 
     override fun onPause() {
@@ -611,7 +623,14 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         runOnUiThread {
             _binding ?: return@runOnUiThread
             val res = pump.reservoirLevel
-            binding.pumpReservoir.text = if (res > 0) "${decimalFormatter.to0Decimal(res)}U" else "---"
+            val maxReading = pump.pumpDescription.maxResorvoirReading.toDouble()
+            if (pump.pumpDescription.isPatchPump && res >= maxReading) {
+                binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(maxReading)}+U"
+            } else if (res > 0) {
+                binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(res)}U"
+            } else {
+                binding.pumpReservoir.text = "---"
+            }
             val bat = pump.batteryLevel
             binding.pumpBattery.text = if (bat != null) "\uD83D\uDD0B ${bat}%" else "\uD83D\uDD0B ---"
             val cStr = formatAgeDaysHours(boostStatus.cannulaAgeDays)
@@ -619,7 +638,11 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             binding.pumpAges.text = "\uD83E\uDE79 $cStr  \uD83D\uDCE1 $sStr"
 
             // TalkBack — set on container; mark children as not individually important
-            val resDesc = if (res > 0) "${decimalFormatter.to0Decimal(res)} units" else "unknown"
+            val resDesc = if (pump.pumpDescription.isPatchPump && res >= maxReading) {
+                "${decimalFormatter.to0Decimal(maxReading)} plus units"
+            } else if (res > 0) {
+                "${decimalFormatter.to0Decimal(res)} units"
+            } else "unknown"
             val batDesc = if (bat != null) "$bat percent" else "unknown"
             val cDesc = formatAgeDaysHours(boostStatus.cannulaAgeDays)
             val sDesc = formatAgeDaysHours(boostStatus.sensorAgeDays)
@@ -634,17 +657,30 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         if (!isAdded) return
         val bs = cached ?: boostHelper.getBoostStatus()
 
-        // Target: use algorithm's actual target, fallback to persistence
-        val targetMgdl = if (bs.targetBgMgdl > 0) bs.targetBgMgdl
-            else persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())?.lowTarget
-                ?: profileFunction.getProfile()?.getTargetMgdl() ?: 100.0
-        val targetStr = profileUtil.fromMgdlToStringInUnits(targetMgdl)
+        // Target: always show active temp target from DB if one exists.
+        // Only use algorithm's adjusted target when no temp target is active.
         val tempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())
         val hasTempTarget = tempTarget != null
-        // Check if APS has adjusted the target away from profile
         val profileTargetMgdl = profileFunction.getProfile()?.getTargetMgdl() ?: 0.0
-        val apsAdjustedTarget = !hasTempTarget && profileTargetMgdl > 0 &&
-            bs.targetBgMgdl > 0 && kotlin.math.abs(profileTargetMgdl - bs.targetBgMgdl) > 0.01
+        val targetMgdl: Double
+        val apsAdjustedTarget: Boolean
+
+        if (hasTempTarget) {
+            // Active temp target — show its actual value, not the algorithm's interpretation
+            targetMgdl = tempTarget!!.lowTarget
+            apsAdjustedTarget = false
+        } else if (bs.targetBgMgdl > 0 && profileTargetMgdl > 0 &&
+            kotlin.math.abs(profileTargetMgdl - bs.targetBgMgdl) > 0.01) {
+            // No temp target but algorithm has adjusted away from profile
+            // (e.g. sensitivity raises/lowers target)
+            targetMgdl = bs.targetBgMgdl
+            apsAdjustedTarget = true
+        } else {
+            // No temp target, no algorithm adjustment — show profile target
+            targetMgdl = profileTargetMgdl.takeIf { it > 0 } ?: 100.0
+            apsAdjustedTarget = false
+        }
+        val targetStr = profileUtil.fromMgdlToStringInUnits(targetMgdl)
 
         // TDD: try oapsProfile.TDD (weighted), then parse from scriptDebug, fallback to 7d avg
         val tddWeighted = bs.tddWeighted
@@ -970,6 +1006,9 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                     if (xDripSource.isEnabled())
                         uiInteraction.runCalibrationDialog(childFragmentManager)
                 }
+                R.id.pump_status_layout -> {
+                    popupBolusDialogIfRunning(onClick = true)
+                }
             }
         }
     }
@@ -1030,6 +1069,24 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             setBackgroundColor(rh.gac(context, attrResBack))
             setTextColor(rh.gac(context, attrResText))
             compoundDrawables[0]?.setTint(rh.gac(context, attrResText))
+        }
+    }
+
+    /**
+     * Show bolus progress dialog if a bolus is currently being delivered.
+     * Called on resume (auto-show) and on pump status bar tap (manual).
+     * Only shows for manual boluses (not SMBs) unless onClick = true.
+     */
+    fun popupBolusDialogIfRunning(onClick: Boolean) {
+        if (commandQueue.bolusInQueue()) {
+            if (!BolusProgressData.bolusEnded && (!BolusProgressData.isSMB || onClick)) {
+                activity?.let { activity ->
+                    protectionCheck.queryProtection(activity, ProtectionCheck.Protection.BOLUS, UIRunnable {
+                        if (isAdded)
+                            uiInteraction.runBolusProgressDialog(childFragmentManager)
+                    })
+                }
+            }
         }
     }
 

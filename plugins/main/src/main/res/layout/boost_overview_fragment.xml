@@ -112,7 +112,7 @@
                         android:id="@+id/loop_status_text"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="10sp"
+                        android:textSize="11sp"
                         android:textColor="?android:attr/textColorSecondary"
                         android:visibility="gone"
                         tools:text="30m" />
