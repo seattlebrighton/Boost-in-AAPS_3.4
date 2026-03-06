@@ -611,7 +611,14 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         runOnUiThread {
             _binding ?: return@runOnUiThread
             val res = pump.reservoirLevel
-            binding.pumpReservoir.text = if (res > 0) "${decimalFormatter.to0Decimal(res)}U" else "---"
+            val maxReading = pump.pumpDescription.maxResorvoirReading.toDouble()
+            if (pump.pumpDescription.isPatchPump && res >= maxReading) {
+                binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(maxReading)}+U"
+            } else if (res > 0) {
+                binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(res)}U"
+            } else {
+                binding.pumpReservoir.text = "---"
+            }
             val bat = pump.batteryLevel
             binding.pumpBattery.text = if (bat != null) "\uD83D\uDD0B ${bat}%" else "\uD83D\uDD0B ---"
             val cStr = formatAgeDaysHours(boostStatus.cannulaAgeDays)
@@ -619,7 +626,11 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             binding.pumpAges.text = "\uD83E\uDE79 $cStr  \uD83D\uDCE1 $sStr"
 
             // TalkBack — set on container; mark children as not individually important
-            val resDesc = if (res > 0) "${decimalFormatter.to0Decimal(res)} units" else "unknown"
+            val resDesc = if (pump.pumpDescription.isPatchPump && res >= maxReading) {
+                "${decimalFormatter.to0Decimal(maxReading)} plus units"
+            } else if (res > 0) {
+                "${decimalFormatter.to0Decimal(res)} units"
+            } else "unknown"
             val batDesc = if (bat != null) "$bat percent" else "unknown"
             val cDesc = formatAgeDaysHours(boostStatus.cannulaAgeDays)
             val sDesc = formatAgeDaysHours(boostStatus.sensorAgeDays)
