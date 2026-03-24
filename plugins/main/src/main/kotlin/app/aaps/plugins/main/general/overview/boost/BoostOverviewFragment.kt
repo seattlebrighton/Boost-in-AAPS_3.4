@@ -592,6 +592,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         if (!isAdded) return
         val profile = profileFunction.getProfile()
         val profileName = profileFunction.getOriginalProfileName()
+            .replace(Regex("""\s*\(\d+%\)$"""), "")
         val isModified = (profile as? ProfileSealed.EPS)?.let {
             it.value.originalPercentage != 100 || it.value.originalTimeshift != 0L || it.value.originalDuration != 0L
         } ?: false
