@@ -1191,6 +1191,9 @@ class DetermineBasalBoost @Inject constructor(
                 else if (boostActive && glucose_status.delta > 0 && delta_accl >= 0.5) {
                     consoleError.add(">>> TIER 7: Enhanced oref1 <<<")
                     rT.boostTier = "ENHANCED_OREF1"
+                    if (insulinReq > boostMaxIOB - iob_data.iob) {
+                        insulinReq = boostMaxIOB - iob_data.iob
+                    }
                     microBolus = Math.floor(min(insulinReq / insulinReqPCT, boost_max) * roundSMBTo) / roundSMBTo
                     rT.reason.append("Enhanced oref1 triggered; SMB equals $microBolus; ")
                 }

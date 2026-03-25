@@ -57,7 +57,7 @@ The following settings are available in the Dynamic ISF V2 sub-screen:
 
 * *Use TDD-based ISF* — Enable or disable TDD-based ISF calculation. When disabled, profile ISF is used directly. TDD data is required for V2 — falls back to profile ISF if data is incomplete.
 * *Adjust Sensitivity* — Adjust sensitivity ratio using 24h TDD / 7D TDD, similar to Autosens. Recommended to start with this off.
-* *DynISF normal target (mg/dl)* — Reference BG target for the ISF calculation. Default: 99.
+* *DynISF normal target* — Reference BG target for the ISF calculation. Default: 99.
 * *DynISF BG cap* — BG above this value is softened to reduce ISF aggressiveness at very high BG. Default: 210.
 * *TDD adjustment factor (%)* — Scales the blended TDD value up or down before ISF calculation. Default: 100.
 

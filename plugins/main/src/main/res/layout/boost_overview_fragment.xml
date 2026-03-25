@@ -112,7 +112,7 @@
                         android:id="@+id/loop_status_text"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:textSize="10sp"
+                        android:textSize="11sp"
                         android:textColor="?android:attr/textColorSecondary"
                         android:visibility="gone"
                         tools:text="30m" />
@@ -137,15 +137,6 @@
                 android:textColor="?android:attr/textColorSecondary"
                 android:paddingBottom="8dp"
                 tools:text="-0.8 mg/dL · Falling slowly" />
-
-            <ImageView
-                android:id="@+id/bg_quality"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_gravity="center_horizontal"
-                android:visibility="gone"
-                android:contentDescription="@string/data_status"
-                tools:ignore="ContentDescription" />
 
             <!-- ═══ Detail panels ═══ -->
             <com.google.android.material.card.MaterialCardView

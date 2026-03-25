@@ -19,7 +19,6 @@ import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.automation.Automation
-import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
@@ -123,6 +122,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
     @Inject lateinit var decimalFormatter: DecimalFormatter
     @Inject lateinit var graphDataProvider: Provider<GraphData>
     @Inject lateinit var boostHelper: BoostOverviewHelper
+    @Inject lateinit var commandQueue: CommandQueue
     @Inject lateinit var dexcomBoyda: DexcomBoyda
     @Inject lateinit var xDripSource: XDripSource
     @Inject lateinit var uel: UserEntryLogger
@@ -216,12 +216,17 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         binding.panelDynisf.setOnClickListener(this)
         binding.panelProfile.setOnClickListener(this)
         binding.panelProfile.setOnLongClickListener(this)
+        binding.connectionIcon.setOnClickListener(this)
+        binding.connectionIcon.setOnLongClickListener(this)
         binding.panelIob.setOnClickListener(this)
 
         // Second row
         binding.panelTdd.setOnClickListener(this)
         binding.panelTarget.setOnClickListener(this)
         binding.panelActivity.setOnClickListener(this)
+
+        // Pump status bar — tap to show bolus progress dialog
+        binding.pumpStatusLayout.setOnClickListener(this)
 
         // Standard AAPS button click listeners (from overview_buttons_layout include)
         binding.buttonsLayout.acceptTempButton.setOnClickListener(this)
@@ -299,11 +304,14 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         disposable += rxBus
             .toObservable(EventTempTargetChange::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
+            .subscribe({ updateSecondRow() }, fabricPrivacy::logException)
         disposable += rxBus
             .toObservable(EventRunningModeChange::class.java)
             .observeOn(aapsSchedulers.io)
-            .subscribe({ updateLoopIcon() }, fabricPrivacy::logException)
+            .subscribe({
+                updateLoopIcon()
+                runOnUiThread { processButtonsVisibility() }
+            }, fabricPrivacy::logException)
         disposable += rxBus
             .toObservable(EventInitializationChanged::class.java)
             .observeOn(aapsSchedulers.main)
@@ -324,6 +332,8 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         refreshLoop = Runnable { refreshAll(); handler.postDelayed(refreshLoop, 60_000L) }
         handler.postDelayed(refreshLoop, 60_000L)
         handler.post { refreshAll() }
+        updatePumpStatus()
+        updateCalcProgress()
         popupBolusDialogIfRunning(onClick = false)
     }
 
@@ -470,19 +480,6 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             val ageStr = binding.timeAgo.text
             binding.bgBobble.contentDescription = "Blood glucose $bgStr $unitsStr, $trendStr, $ageStr"
             binding.deltaText.contentDescription = binding.deltaText.text
-
-            // BG quality indicator (matches standard Overview)
-            val qualityIcon = bgQualityCheck.icon()
-            if (qualityIcon != 0) {
-                binding.bgQuality.visibility = View.VISIBLE
-                binding.bgQuality.setImageResource(qualityIcon)
-                binding.bgQuality.contentDescription = bgQualityCheck.stateDescription()
-                binding.bgQuality.setOnClickListener {
-                    context?.let { ctx -> OKDialog.show(ctx, rh.gs(R.string.data_status), bgQualityCheck.message) }
-                }
-            } else {
-                binding.bgQuality.visibility = View.GONE
-            }
         }
     }
 
@@ -626,7 +623,14 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         runOnUiThread {
             _binding ?: return@runOnUiThread
             val res = pump.reservoirLevel
-            binding.pumpReservoir.text = if (res > 0) "${decimalFormatter.to0Decimal(res)}U" else "---"
+            val maxReading = pump.pumpDescription.maxResorvoirReading.toDouble()
+            if (pump.pumpDescription.isPatchPump && res >= maxReading) {
+                binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(maxReading)}+U"
+            } else if (res > 0) {
+                binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(res)}U"
+            } else {
+                binding.pumpReservoir.text = "---"
+            }
             val bat = pump.batteryLevel
             binding.pumpBattery.text = if (bat != null) "\uD83D\uDD0B ${bat}%" else "\uD83D\uDD0B ---"
             val cStr = formatAgeDaysHours(boostStatus.cannulaAgeDays)
@@ -634,7 +638,11 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             binding.pumpAges.text = "\uD83E\uDE79 $cStr  \uD83D\uDCE1 $sStr"
 
             // TalkBack — set on container; mark children as not individually important
-            val resDesc = if (res > 0) "${decimalFormatter.to0Decimal(res)} units" else "unknown"
+            val resDesc = if (pump.pumpDescription.isPatchPump && res >= maxReading) {
+                "${decimalFormatter.to0Decimal(maxReading)} plus units"
+            } else if (res > 0) {
+                "${decimalFormatter.to0Decimal(res)} units"
+            } else "unknown"
             val batDesc = if (bat != null) "$bat percent" else "unknown"
             val cDesc = formatAgeDaysHours(boostStatus.cannulaAgeDays)
             val sDesc = formatAgeDaysHours(boostStatus.sensorAgeDays)
@@ -649,17 +657,30 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         if (!isAdded) return
         val bs = cached ?: boostHelper.getBoostStatus()
 
-        // Target: use algorithm's actual target, fallback to persistence
-        val targetMgdl = if (bs.targetBgMgdl > 0) bs.targetBgMgdl
-            else persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())?.lowTarget
-                ?: profileFunction.getProfile()?.getTargetMgdl() ?: 100.0
-        val targetStr = profileUtil.fromMgdlToStringInUnits(targetMgdl)
+        // Target: always show active temp target from DB if one exists.
+        // Only use algorithm's adjusted target when no temp target is active.
         val tempTarget = persistenceLayer.getTemporaryTargetActiveAt(dateUtil.now())
         val hasTempTarget = tempTarget != null
-        // Check if APS has adjusted the target away from profile
         val profileTargetMgdl = profileFunction.getProfile()?.getTargetMgdl() ?: 0.0
-        val apsAdjustedTarget = !hasTempTarget && profileTargetMgdl > 0 &&
-            bs.targetBgMgdl > 0 && kotlin.math.abs(profileTargetMgdl - bs.targetBgMgdl) > 0.01
+        val targetMgdl: Double
+        val apsAdjustedTarget: Boolean
+
+        if (hasTempTarget) {
+            // Active temp target — show its actual value, not the algorithm's interpretation
+            targetMgdl = tempTarget!!.lowTarget
+            apsAdjustedTarget = false
+        } else if (bs.targetBgMgdl > 0 && profileTargetMgdl > 0 &&
+            kotlin.math.abs(profileTargetMgdl - bs.targetBgMgdl) > 0.01) {
+            // No temp target but algorithm has adjusted away from profile
+            // (e.g. sensitivity raises/lowers target)
+            targetMgdl = bs.targetBgMgdl
+            apsAdjustedTarget = true
+        } else {
+            // No temp target, no algorithm adjustment — show profile target
+            targetMgdl = profileTargetMgdl.takeIf { it > 0 } ?: 100.0
+            apsAdjustedTarget = false
+        }
+        val targetStr = profileUtil.fromMgdlToStringInUnits(targetMgdl)
 
         // TDD: try oapsProfile.TDD (weighted), then parse from scriptDebug, fallback to 7d avg
         val tddWeighted = bs.tddWeighted
@@ -1041,19 +1062,6 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         }
     }
 
-    /** Show bolus progress dialog if a bolus is currently being delivered (matches standard Overview) */
-    private fun popupBolusDialogIfRunning(onClick: Boolean) {
-        if (commandQueue.bolusInQueue()) {
-            if (!BolusProgressData.bolusEnded && (!BolusProgressData.isSMB || onClick)) {
-                activity?.let { a ->
-                    protectionCheck.queryProtection(a, ProtectionCheck.Protection.BOLUS, UIRunnable {
-                        if (isAdded) uiInteraction.runBolusProgressDialog(childFragmentManager)
-                    })
-                }
-            }
-        }
-    }
-
     /** Set button text, background and text colour (matches standard Overview ribbon styling) */
     private fun setRibbon(view: android.widget.TextView, attrResText: Int, attrResBack: Int, text: String) {
         with(view) {
@@ -1061,6 +1069,24 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             setBackgroundColor(rh.gac(context, attrResBack))
             setTextColor(rh.gac(context, attrResText))
             compoundDrawables[0]?.setTint(rh.gac(context, attrResText))
+        }
+    }
+
+    /**
+     * Show bolus progress dialog if a bolus is currently being delivered.
+     * Called on resume (auto-show) and on pump status bar tap (manual).
+     * Only shows for manual boluses (not SMBs) unless onClick = true.
+     */
+    fun popupBolusDialogIfRunning(onClick: Boolean) {
+        if (commandQueue.bolusInQueue()) {
+            if (!BolusProgressData.bolusEnded && (!BolusProgressData.isSMB || onClick)) {
+                activity?.let { activity ->
+                    protectionCheck.queryProtection(activity, ProtectionCheck.Protection.BOLUS, UIRunnable {
+                        if (isAdded)
+                            uiInteraction.runBolusProgressDialog(childFragmentManager)
+                    })
+                }
+            }
         }
     }
 

@@ -84,7 +84,7 @@
     <string name="boost_use_tdd_summary">Calculate ISF from Total Daily Dose using the logarithmic formula. When disabled, uses profile ISF directly</string>
     <string name="boost_adjust_sensitivity_title">Enable TDD sensitivity adjustment</string>
     <string name="boost_adjust_sensitivity_summary">Adjust sensitivity ratio using 24h TDD / 7D TDD, similar to Autosens. Recommended to start with this off</string>
-    <string name="boost_dynisf_normal_target_title">DynISF normal target (mg/dl)</string>
+    <string name="boost_dynisf_normal_target_title">DynISF normal target</string>
     <string name="boost_dynisf_normal_target_summary">Reference BG target for ISF calculation. Default: 99</string>
     <string name="boost_dynisf_velocity_title">BG impact on ISF (%)</string>
     <string name="boost_dynisf_velocity_summary">Controls how much your current blood glucose level affects ISF. At 100%%, ISF is fully adjusted by BG (higher BG = stronger ISF). At 50%%, only half the BG-driven adjustment is applied. At 0%%, BG has no effect and ISF stays at the target-level value regardless of current BG. Default: 100</string>
