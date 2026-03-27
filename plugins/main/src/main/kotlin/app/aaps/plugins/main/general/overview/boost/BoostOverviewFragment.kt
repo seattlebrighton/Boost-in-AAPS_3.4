@@ -33,6 +33,9 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.WarnColors
+import app.aaps.core.data.model.TE
+import app.aaps.core.keys.IntKey
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
@@ -126,6 +129,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
     @Inject lateinit var dexcomBoyda: DexcomBoyda
     @Inject lateinit var xDripSource: XDripSource
     @Inject lateinit var uel: UserEntryLogger
+    @Inject lateinit var warnColors: WarnColors
 
     // --- State ---
 
@@ -636,7 +640,23 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             binding.pumpBattery.text = if (bat != null) "\uD83D\uDD0B ${bat}%" else "\uD83D\uDD0B ---"
             val cStr = formatAgeDaysHours(boostStatus.cannulaAgeDays)
             val sStr = formatAgeDaysHours(boostStatus.sensorAgeDays)
-            binding.pumpAges.text = "\uD83E\uDE79 $cStr  \uD83D\uDCE1 $sStr"
+            binding.pumpCannulaAge.text = "\uD83E\uDE79 $cStr"
+            binding.pumpSensorAge.text = "\uD83D\uDCE1 $sStr"
+            // Apply warning/critical colours matching the standard status lights
+            val cannulaTE = persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.CANNULA_CHANGE)
+            val sensorTE = persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE)
+            if (cannulaTE != null) {
+                warnColors.setColorByAge(binding.pumpCannulaAge, cannulaTE,
+                    preferences.get(IntKey.OverviewCageWarning), preferences.get(IntKey.OverviewCageCritical))
+            } else {
+                binding.pumpCannulaAge.setTextColor(rh.gac(context, app.aaps.core.ui.R.attr.defaultTextColor))
+            }
+            if (sensorTE != null) {
+                warnColors.setColorByAge(binding.pumpSensorAge, sensorTE,
+                    preferences.get(IntKey.OverviewSageWarning), preferences.get(IntKey.OverviewSageCritical))
+            } else {
+                binding.pumpSensorAge.setTextColor(rh.gac(context, app.aaps.core.ui.R.attr.defaultTextColor))
+            }
 
             // TalkBack — set on container; mark children as not individually important
             val resDesc = if (pump.pumpDescription.isPatchPump && res >= maxReading) {
