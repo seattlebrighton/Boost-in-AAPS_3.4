@@ -43,8 +43,10 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventAcceptOpenLoopChange
 import app.aaps.core.interfaces.rx.events.EventBucketedDataCreated
 import app.aaps.core.interfaces.rx.events.EventEffectiveProfileSwitchChanged
+import app.aaps.core.interfaces.rx.events.EventExtendedBolusChange
 import app.aaps.core.interfaces.rx.events.EventNewOpenLoopNotification
 import app.aaps.core.interfaces.rx.events.EventInitializationChanged
+import app.aaps.core.interfaces.rx.events.EventTempBasalChange
 import app.aaps.core.interfaces.rx.events.EventRunningModeChange
 import app.aaps.core.interfaces.rx.events.EventPreferenceChange
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
@@ -55,6 +57,7 @@ import app.aaps.core.interfaces.rx.events.EventWearUpdateTiles
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewCalcProgress
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewGraph
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewIobCob
+import app.aaps.core.interfaces.rx.events.EventUpdateOverviewSensitivity
 import app.aaps.core.interfaces.source.DexcomBoyda
 import app.aaps.core.interfaces.source.XDripSource
 import app.aaps.core.interfaces.ui.UiInteraction
@@ -332,6 +335,19 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                 preferences.put(IntNonKey.RangeToDisplay, it.hours)
                 rxBus.send(EventPreferenceChange(IntNonKey.RangeToDisplay.key))
             }, fabricPrivacy::logException)
+        disposable += rxBus
+            .toObservable(EventTempBasalChange::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
+        disposable += rxBus
+            .toObservable(EventExtendedBolusChange::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
+        disposable += activePlugin.activeOverview.overviewBus
+            .toObservable(EventUpdateOverviewSensitivity::class.java)
+            .debounce(1L, TimeUnit.SECONDS)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
 
         refreshLoop = Runnable { refreshAll(); handler.postDelayed(refreshLoop, 60_000L) }
         handler.postDelayed(refreshLoop, 60_000L)
