@@ -148,7 +148,7 @@ The Boost Overview reads algorithm data directly from the last APS run result. F
 
 ###Dynamic ISF in Boost Plugin
 
-Dynamic ISF settings are located within the Boost and Boost2 plugin Preferences sub-screen.
+Dynamic ISF settings are located within the Boost and Boost V2 plugin preferences sub-screen.
 
 ### Settings
 
@@ -195,7 +195,7 @@ In V2, the dosing ISF applies the full scaler ratio with no velocity dampening. 
 
 ## Night Mode
 
-Night Mode is located within the Boost V2 preferences under the **Night Mode** sub-screen. This enables SMBs to be disabled overnight in certain circumstances. The settings are:
+Night Mode is located within both the **Boost and Boost V2** preferences under the **Night Mode** sub-screen. This enables SMBs to be disabled overnight in certain circumstances. The settings are:
 
 * *Enable Night Mode* — Master switch to enable or disable the feature.
 * *BG Offset* — When Night Mode is enabled, this is the value above your target at which point SMBs will be re-enabled.
@@ -215,21 +215,21 @@ The end time can run over midnight, so you can set a start time of 07:00 and an 
 
 ## Boost
 
-You can use Boost V2 when announcing carbs or without announcing carbs. With COB there is an additional piece of bolusing code that operates for the first 40 mins of COB. If you prefer to manually bolus, it fully supports that with no other code.
+You can use Boost and Boost V2 when announcing carbs or without announcing carbs. With COB there is an additional piece of bolusing code that operates for the first 40 mins of COB. If you prefer to manually bolus, it fully supports that with no other code.
 
 It also has variable insulin percentage determined by the user, and while boost time is valid, the algorithm can bolus up to a maximum bolus defined by the user in preferences.
 
 The intention of this code is to deliver an early, larger bolus when rises are detected to initiate UAM deviations and to allow the algorithm to be more aggressive. Other than Boost, it relies on oref1 adjusted to use the variable ISF function based on TDD.
 
-All of the additional code outside of the standard SMB calculation requires a time period to be specified within which it is active. The default time settings disable the code. The time period is specified in hours using a 24 hour clock in the Boost V2 preferences section.
+All of the additional code outside of the standard SMB calculation requires a time period to be specified within which it is active. The default time settings disable the code. The time period is specified in hours using a 24 hour clock in the Boost and Boost V2 preferences section.
 
-**COB:** ***Note: Boost V2 is not designed to be used with eCarbs. This may result in additional, unexpected bolusing. Do not use it.***
+**COB:** ***Note: Boost and Boost V2 are not designed to be used with eCarbs. This may result in additional, unexpected bolusing. Do not use it.***
 
-With Carbs on Board, Boost V2 has a 25 minute window to deliver the equivalent of a mealtime bolus and **is allowed to go higher than your Boost Bolus Cap**, up to `InsulinRequired / insulin required percent` calculated by the oref1 algorithm, taking carbs into account. In the following period up to 40 mins after the carbs are added, it can do additional larger boluses, as long as there is a delta > 5 and COB > 0. The max allowed is the greater of the Boost Bolus Cap or the "COB cap", which is calculated as `COB / Carb Ratio`.
+With Carbs on Board, Boost and Boost V2 have a 25 minute window to deliver the equivalent of a mealtime bolus and **are allowed to go higher than your Boost Bolus Cap**, up to `InsulinRequired / insulin required percent` calculated by the oref1 algorithm, taking carbs into account. In the following period up to 40 mins after the carbs are added, it can do additional larger boluses, as long as there is a delta > 5 and COB > 0. The max allowed is the greater of the Boost Bolus Cap or the "COB cap", which is calculated as `COB / Carb Ratio`.
 
-During normal use, you should set your Boost Bolus Cap to be the max that Boost V2 delivers when Boost is enabled and no COB are entered.
+During normal use, you should set your Boost Bolus Cap to be the max that Boost or Boost V2 delivers when Boost is enabled and no COB are entered.
 
-Boost V2 outside the first 40 mins of COB, or with 0 COB, has six phases:
+Boost and Boost V2 outside the first 40 mins of COB, or with 0 COB, have six phases:
 
 1. **Boost bolus (UAM Boost)**
 2. **High Boost Bolus (UAM High Boost)**
@@ -244,7 +244,7 @@ When an initial rise is detected with a meal, but no announced COB, delta, short
 
 The user defined Boost Scale Value can be used to increase the boost bolus if the user requires, however, users should be aware that this increases the risk of hypos when small rises occur.
 
-Boost V2 also uses the percent scale value to increase the early bolus size.
+Both Boost and Boost V2 use the percent scale value to increase the early bolus size.
 
 If **Boost Scale Value** is less than 3, Boost is enabled.
 
@@ -280,7 +280,7 @@ Enhanced oref1 only fires when deltas are increasing above a rate of 0.5%. This 
 
 ## Settings
 
-The **BOOST V2** settings have a number of extra items. Note that the default settings are designed to disable most of the functions, and you will need to adjust them.
+The **Boost and Boost V2** settings share the following configuration. Note that the default settings are designed to disable most of the functions, and you will need to adjust them.
 
 * *Boost insulin required percent* — Defaults to 50%. Can be increased, but increasing increases hypo risk.
 * *Boost Scale Value* — Defaults to 1.0. Only increase multiplier once you have trialled.
@@ -298,7 +298,7 @@ The settings with the largest effect on post prandial outcomes are *Boost insuli
 
 *Percent scale factor* — This is the max amount that the Boost and Percent Scale functions can multiply the insulin required by at lower glucose levels. A larger number here leads to more insulin.
 
-*SMBMinutes settings* — When there is no longer any acceleration in glucose delta values, the algorithm reverts to standard oref1 code and uses SMBminutes values as its max SMB size. When using Boost V2 these values should generally be set to less than the default 30 mins. A max of 15 or 20 is usually best.
+*SMBMinutes settings* — When there is no longer any acceleration in glucose delta values, the algorithm reverts to standard oref1 code and uses SMBminutes values as its max SMB size. When using Boost or Boost V2 these values should generally be set to less than the default 30 mins. A max of 15 or 20 is usually best.
 
 **Recommended Settings**
 
@@ -310,13 +310,13 @@ Start with the same settings as Boost V1. Because the V2 formula amplifies TDD c
 * *UAM Boost max IOB* — Start at 5% of TDD and be aware that max IOB is a safety feature, and higher values create greater risk of hypo.
 * *UAMSMBBasalMinutes* — 20 mins. This is only used overnight when IOB is large enough to trigger UAM, so it doesn't need to be a large value.
 * *Boost insulin required percent* — Recommended not to exceed 75%. Start at 50% and increase as necessary.
-* *Target* — Set a target of 120 mg/dl (6.5 mmol/l) to get started with Boost V2. This provides a cushion as you adjust settings. Values below 100 mg/dl (5.5 mmol/l) are not recommended.
+* *Target* — Set a target of 120 mg/dl (6.5 mmol/l) to get started with Boost or Boost V2. This provides a cushion as you adjust settings. Values below 100 mg/dl (5.5 mmol/l) are not recommended.
 
 ---
 
 ## Stepcount Features
 
-The three stepcount features are located in the Boost V2 preferences under the **Step Count Settings** sub-screen:
+The three stepcount features are located in both the **Boost and Boost V2** preferences under the **Step Count Settings** sub-screen:
 
 1. **Inactivity Detection** — Determines when the stepcount is below a user defined limit over the previous hour, and increases basal and DynamicISF adjustment factor by a user defined percentage. The defaults are 400 steps and increase to 130%. Inactivity detection does not work when Sleep-in protection is active.
 
@@ -332,7 +332,7 @@ There are no enable/disable buttons for these settings, however, in both activit
 
 ## BG Source Compatibility **WARNING - SAFETY RISK**
 
-There is a setting in the Boost V2 preferences called **"Allow all BG sources for SMBs"**. This switch allows SMBs always, regardless of BG source, across the Boost V2 plugin. If you are using a Libre sensor or any other source that does not natively support advanced filtering, you will need to enable this setting. Please make sure you are using a sensor collection app that is providing glucose data every five minutes, and enable at least the Average Smoothing plugin.
+There is a setting in both the **Boost and Boost V2** preferences called **"Allow all BG sources for SMBs"**. This switch allows SMBs always, regardless of BG source, across both plugins. If you are using a Libre sensor or any other source that does not natively support advanced filtering, you will need to enable this setting. Please make sure you are using a sensor collection app that is providing glucose data every five minutes, and enable at least the Average Smoothing plugin.
 
 ---
 
