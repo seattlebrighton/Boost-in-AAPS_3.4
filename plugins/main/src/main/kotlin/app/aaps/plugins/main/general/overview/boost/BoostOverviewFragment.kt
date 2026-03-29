@@ -589,6 +589,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             binding.panelIobValue.setTextColor(rh.gac(ctx, app.aaps.core.ui.R.attr.iobColor))
             binding.panelBoostValue.text = boostStatus.tierLabel
             binding.panelBoostValue.setTextColor(boostStatus.tier.colorHex.toInt())
+            binding.panelBoostFastCarb.visibility = if (boostStatus.fastCarbProtection) View.VISIBLE else View.GONE
 
             val dynRaw = boostStatus.dynIsfValue
             val dynDisp = if (dynRaw > 0) {
@@ -600,7 +601,8 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
 
             // TalkBack content descriptions (set on parent panels — the clickable elements)
             binding.panelIob.contentDescription = "Insulin on board: ${String.format(Locale.getDefault(), "%.2f", totalIob)} units. Tap for details"
-            binding.panelBoost.contentDescription = "Boost tier: ${boostStatus.tierLabel}. Tap for details"
+            val fcDesc = if (boostStatus.fastCarbProtection) "Fast carb protection active. " else ""
+            binding.panelBoost.contentDescription = "${fcDesc}Boost tier: ${boostStatus.tierLabel}. Tap for details"
             val unitsStr = if (profileFunction.getUnits() == GlucoseUnit.MGDL) "mg/dL per unit" else "mmol/L per unit"
             binding.panelDynisf.contentDescription = "Dynamic ISF: $dynDisp $unitsStr. Tap for details"
         }
@@ -958,8 +960,9 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                 // Boost detail panels
                 R.id.panel_boost -> {
                     val bs = lastBoostStatus
+                    val fcLine = if (bs.fastCarbProtection) "⚠️ Fast Carb Protection active — UAM/Accel tiers suppressed\n\n" else ""
                     OKDialog.show(a, "Boost Decision",
-                        "Current tier: ${bs.tierLabel}\n\nReason: ${bs.tierReason}\n\nDelta accel: ${String.format("%.1f", bs.deltaAccl)}")
+                        "${fcLine}Current tier: ${bs.tierLabel}\n\nReason: ${bs.tierReason}\n\nDelta accel: ${String.format("%.1f", bs.deltaAccl)}")
                 }
                 R.id.panel_dynisf -> {
                     val bs = lastBoostStatus

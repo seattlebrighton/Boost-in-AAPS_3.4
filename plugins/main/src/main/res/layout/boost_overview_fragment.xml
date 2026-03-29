@@ -225,6 +225,16 @@
                             android:textSize="12sp"
                             android:textStyle="bold"
                             tools:text="Percent Scale" />
+                        <TextView
+                            android:id="@+id/panel_boost_fast_carb"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="10sp"
+                            android:textStyle="bold"
+                            android:textColor="#FFFF9800"
+                            android:text="Fast Carb"
+                            android:visibility="gone"
+                            tools:ignore="HardcodedText" />
                     </LinearLayout>
 
                     <!-- DynISF panel -->

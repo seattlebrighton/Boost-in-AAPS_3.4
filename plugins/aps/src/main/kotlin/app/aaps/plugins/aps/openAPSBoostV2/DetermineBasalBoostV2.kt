@@ -1098,6 +1098,7 @@ class DetermineBasalBoostV2 @Inject constructor(
                     && meal_data.mealCOB == 0.0
                     && bg < 170.0
                     && delta_accl > 25.0
+                rT.fastCarbProtection = fastCarbRebound
                 if (fastCarbRebound) {
                     val trigger = when {
                         lowTriggered && reversalTriggered -> "low ${round(profile.recentLowBG, 0)} rev ${round(reversalScore, 0)}"
