@@ -19,6 +19,105 @@ This release also includes a **new Boost Overview UI** — a redesigned home scr
 
 ## What's new in this release?
 
+### Calibration SMB Block
+
+When a CGM calibration is detected, Boost and Boost V2 now automatically suppress SMBs for 15 minutes. Calibration can cause the sensor to temporarily report erratic or inaccurate glucose values, making the algorithm's decisions unreliable during the stabilisation period. The block applies only to SMBs — temp basal adjustments continue normally throughout.
+
+Calibrations are detected from two sources: native CGM sources (Dexcom, Glunovo, Intelligo) that insert a `FINGER_STICK_BG_VALUE` therapy event into AAPS, and the AAPS Calibration dialog when a value is confirmed. Calibrations performed directly within xDrip+ and not entered via AAPS are invisible to the system and cannot be detected.
+
+No settings are required. The block is always active and cannot be disabled.
+
+---
+
+### Post-Exercise Recovery Mode
+
+After exercise ends, Boost and Boost V2 can automatically set a recovery TempTarget and reduce SMB aggressiveness for a configurable period. Post-exercise hypoglycaemia is one of the most common risks in closed-loop T1D management: glucose uptake by exercised muscle continues for up to two hours after aerobic exercise stops (immediate risk), and glycogen replenishment drives ongoing glucose uptake overnight (delayed risk).
+
+**How it works:**
+
+Exercise end is detected automatically by monitoring the step count transition from active to inactive. When steps were above the activity threshold and then fall back to resting levels, recovery is triggered. A minimum exercise duration (default 10 minutes) prevents false triggers from brief step bursts.
+
+Once triggered, two protective actions are taken simultaneously:
+
+1. **Visible TempTarget** — a temporary glucose target is inserted into AAPS (default 8.0 mmol/L / 144 mg/dL) for the duration of the recovery window. This target is visible in the Overview and can be cancelled manually at any time. If a TempTarget is already active, this step is skipped.
+2. **Internal SMB reduction** — `boost_bolus` and `boost_scale` are reduced by a configurable factor (default 50%) for the duration of the window. This provides a safety net even if the user cancels the TempTarget.
+
+**Recovery window defaults** are based on ATTD 2020 consensus (Riddell et al.):
+- Recovery window: 2 hours (primary aerobic hypo risk window)
+- Recovery target: 8.0 mmol/L / 144 mg/dL (ATTD recommended centre-point)
+- SMB reduction: 50%
+- Minimum exercise duration to trigger: 10 minutes
+
+All four values are user-configurable in the **Post-Exercise Recovery** sub-screen within Boost preferences.
+
+**Integration with Heart Rate** (see below): when Heart Rate integration is enabled, the recovery parameters adapt automatically to the type of exercise detected — see [Heart Rate Integration](#heart-rate-integration) for details.
+
+---
+
+### Heart Rate Integration
+
+Boost and Boost V2 can now use heart rate data alongside step counts for more accurate exercise detection and classification. Steps alone cannot detect resistance training (low steps, elevated HR), stress/illness (elevated HR without movement), or distinguish vigorous aerobic exercise from a brisk walk.
+
+Heart rate data is read from AAPS's built-in HR recording mechanism (populated by paired watches/wearables). Each reading is a 1-minute duration-weighted average of beats per minute stored in the AAPS database.
+
+**Classification model — Karvonen Heart Rate Reserve (HRR%):**
+
+```
+HRR% = (current HR − resting HR) / (HRmax − resting HR) × 100
+```
+
+Karvonen is used in preference to simple %HRmax because it accounts for individual fitness level. Five zones are defined:
+
+| Zone | HRR% | Label |
+|---|---|---|
+| 1 | < 30% | Very light (recovery, rest) |
+| 2 | 30–40% | Light (easy aerobic) |
+| 3 | 40–60% | Moderate (aerobic conditioning) |
+| 4 | 60–80% | Hard (vigorous aerobic / strength) |
+| 5 | > 80% | Maximum effort |
+
+**Combined exercise states (HR + steps):**
+
+| State | Detection | Effect |
+|---|---|---|
+| VIGOROUS_AEROBIC | High steps + zone 3–5 | Reduced profile %, raised target |
+| MODERATE_AEROBIC | Moderate steps + zone 2–3 | Same as step-only ACTIVE |
+| LIGHT_AEROBIC | Steps elevated + zone 1–2 | Same as step-only ACTIVE |
+| RESISTANCE | Low/no steps + zone 3–4 | Raised target only — profile % unchanged (BG rises acutely; don't increase aggressiveness) |
+| STRESS | Low steps + zone 2–3 (opt-in) | Raised target, profile unchanged |
+| RESTING / INACTIVE | Low HR + low steps | Normal / inactivity reduction |
+
+When HR data is unavailable or the feature is disabled, the code falls through to the existing step-only logic exactly. HR integration is strictly additive — it cannot produce worse behaviour than the step-only path.
+
+**Settings** (in the **Heart Rate Integration** sub-screen):
+- *Enable HR Integration* — Master switch. Default: off (opt-in, requires a paired wearable).
+- *HRmax (BPM)* — Your maximum heart rate. Default: 180. If you know your HRmax (e.g. from a field test), enter it here for more accurate zone calculation. As a rough guide, 220 − age gives an estimate.
+- *Resting HR (BPM)* — Your resting heart rate. Default: 60.
+- *HR window (minutes)* — How many minutes of HR history to average for zone classification. Default: 15.
+- *Enable stress detection* — Raises target BG when elevated HR is detected without movement. Off by default; use with caution.
+
+---
+
+### HR-Informed Post-Exercise Recovery
+
+When both Heart Rate integration and Post-Exercise Recovery are enabled, the recovery parameters adapt to the type of exercise that was detected, rather than using the same settings for every session:
+
+| Exercise type | Recovery window | Target BG | SMB reduction |
+|---|---|---|---|
+| VIGOROUS_AEROBIC | ×1.25 (2h → 2h30m) | unchanged | more (×0.8 of user setting) |
+| RESISTANCE | ×1.5 (2h → 3h) | +10 mg/dL | less (×1.2 of user setting) |
+| LIGHT_AEROBIC | ×0.5 (2h → 1h) | unchanged | less (×1.4 of user setting) |
+| MODERATE / ACTIVE (or no HR) | ×1.0 — user defaults | unchanged | user defaults |
+
+The rationale:
+- **VIGOROUS_AEROBIC**: high immediate hypo risk from rapid glycogen depletion; longer window and stronger SMB suppression.
+- **RESISTANCE**: acute BG rise short-term (don't over-suppress while BG is high), but delayed hypo risk overnight; longest window, higher target, less immediate suppression.
+- **LIGHT_AEROBIC**: minimal glycogen depletion; a shorter window with less suppression is appropriate.
+
+The user's configured settings always serve as the baseline for moderate/unclassified exercise. The multipliers are applied on top.
+
+---
+
 ### Fast-Carb Rebound Protection
 
 When fast-acting carbohydrates are eaten to treat a low (a rescue carb event), the subsequent glucose rise can look identical to an unannounced meal from the algorithm's perspective — rapid rise, no COB entry, high UAM boost factors. Without a logged carb entry, Boost would previously fire its aggressive UAM and acceleration tiers during this recovery, risking insulin stacking onto what is actually a carb-driven rebound.
@@ -309,6 +408,32 @@ Start with the same settings as Boost V1. Because the V2 formula amplifies TDD c
 * *UAMSMBBasalMinutes* — 20 mins. This is only used overnight when IOB is large enough to trigger UAM, so it doesn't need to be a large value.
 * *Boost insulin required percent* — Recommended not to exceed 75%. Start at 50% and increase as necessary.
 * *Target* — Set a target of 120 mg/dl (6.5 mmol/l) to get started with Boost V2. This provides a cushion as you adjust settings. Values below 100 mg/dl (5.5 mmol/l) are not recommended.
+
+---
+
+## Post-Exercise Recovery Settings
+
+Located in the **Post-Exercise Recovery** sub-screen within Boost and Boost V2 preferences.
+
+* *Enable Post-Exercise Recovery* — Master switch. When off, no recovery TempTarget or SMB reduction is applied.
+* *Recovery window (hours)* — How long the recovery window lasts after exercise ends. Default: 2 hours. Range: 0.5–8 hours. When HR integration is enabled, this is used as the baseline and multiplied per exercise type.
+* *Recovery target BG* — The TempTarget BG inserted at the end of exercise. Default: 8.0 mmol/L / 144 mg/dL. Enter in your current display units.
+* *SMB reduction factor* — How much to scale down `boost_bolus` and `boost_scale` during recovery. Default: 0.5 (50%). A value of 1.0 disables the internal SMB reduction while keeping the TempTarget.
+* *Minimum exercise duration (minutes)* — Exercise shorter than this will not trigger recovery. Default: 10 minutes. Prevents false triggers from brief step bursts.
+
+---
+
+## Heart Rate Integration Settings
+
+Located in the **Heart Rate Integration** sub-screen within Boost and Boost V2 preferences.
+
+Requires a Wear OS or Garmin watch paired with AAPS that is recording heart rate data.
+
+* *Enable HR Integration* — Master switch. Default: off. When disabled, all exercise detection falls back to step counts only.
+* *HRmax (BPM)* — Your maximum heart rate for Karvonen zone calculation. Default: 180. Use 220 − your age as a starting estimate, or a measured value from a maximal effort test.
+* *Resting HR (BPM)* — Your resting heart rate (measured first thing in the morning). Default: 60.
+* *HR averaging window (minutes)* — How many minutes of HR history to average before classifying the zone. Default: 15. Shorter values are more responsive; longer values are more stable.
+* *Enable stress detection* — When enabled, elevated HR without movement (zone 2–3, near-zero steps) raises the target BG to protect against cortisol-driven insulin resistance. Off by default. Not recommended unless you have a clear use case, as it has a low confidence signal.
 
 ---
 
