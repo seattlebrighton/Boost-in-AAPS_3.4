@@ -352,7 +352,15 @@ open class OpenAPSBoostPlugin @Inject constructor(
                 aapsLogger.debug(LTag.APS, "Boost: TDD parts missing (7D=$tdd7D 1D=$tdd1D 24H=$tddLast24H 4H=$tddLast4H 8-4H=$tddLast8to4H)")
             }
         } else {
-            debug.append("TDD-based ISF: disabled (using profile ISF ${Round.roundTo(profileSens, 0.1)})")
+            // When TDD-based DynISF is off, profileSens already has the profile switch scaling
+            // baked in (e.g. ×0.8 for 80% activity profile). Apply globalScale to undo it so
+            // ISF isn't artificially lowered (more aggressive) during exercise.
+            if (globalScale != 1.0) {
+                sensNormalTarget *= globalScale
+                debug.append("TDD-based ISF: disabled (profile ISF ${Round.roundTo(profileSens, 0.1)} → ${Round.roundTo(sensNormalTarget, 0.1)} after activity scale correction)")
+            } else {
+                debug.append("TDD-based ISF: disabled (using profile ISF ${Round.roundTo(profileSens, 0.1)})")
+            }
         }
 
         // Temp target sensitivity adjustment
