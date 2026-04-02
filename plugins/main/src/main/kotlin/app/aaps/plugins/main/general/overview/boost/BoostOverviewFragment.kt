@@ -810,22 +810,30 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         graphData.formatAxis(overviewData.fromTime, overviewData.endTime)
         graphData.performUpdate()
 
-        // IOB graph — uses same time range, shows IOB history + projected decay, plus optional HR/steps overlays
+        // IOB graph — uses same time range, shows IOB history + projected decay
         val iobGraphData = graphDataProvider.get().with(binding.iobGraph, overviewData)
         iobGraphData.addIob(true, 1.0)
-        val iobSecondarySettings = menuChartSettings.getOrNull(1)
-        if (iobSecondarySettings != null) {
-            val useHrForScale = iobSecondarySettings[OverviewMenus.CharType.HR.ordinal] &&
-                !iobSecondarySettings[OverviewMenus.CharType.STEPS.ordinal]
-            val useStepsForScale = iobSecondarySettings[OverviewMenus.CharType.STEPS.ordinal]
-            if (iobSecondarySettings[OverviewMenus.CharType.HR.ordinal])
-                iobGraphData.addHeartRate(useHrForScale, if (useHrForScale) 1.0 else 0.8)
-            if (iobSecondarySettings[OverviewMenus.CharType.STEPS.ordinal])
-                iobGraphData.addSteps(useStepsForScale, if (useStepsForScale) 1.0 else 0.8)
-        }
         iobGraphData.addNowLine(dateUtil.now())
         iobGraphData.formatAxis(overviewData.fromTime, overviewData.endTime)
         iobGraphData.performUpdate()
+
+        // HR / Steps graph — dedicated third graph, shown only when HR or Steps enabled in chart menu
+        val hrStepsSettings = menuChartSettings.getOrNull(1)
+        val showHr = hrStepsSettings?.get(OverviewMenus.CharType.HR.ordinal) == true
+        val showSteps = hrStepsSettings?.get(OverviewMenus.CharType.STEPS.ordinal) == true
+        if (showHr || showSteps) {
+            binding.hrStepsGraphContainer.visibility = android.view.View.VISIBLE
+            val hrGraphData = graphDataProvider.get().with(binding.hrStepsGraph, overviewData)
+            val useHrForScale = showHr && !showSteps
+            val useStepsForScale = showSteps
+            if (showHr) hrGraphData.addHeartRate(useHrForScale, if (useHrForScale) 1.0 else 0.8)
+            if (showSteps) hrGraphData.addSteps(useStepsForScale, if (useStepsForScale) 1.0 else 0.8)
+            hrGraphData.addNowLine(dateUtil.now())
+            hrGraphData.formatAxis(overviewData.fromTime, overviewData.endTime)
+            hrGraphData.performUpdate()
+        } else {
+            binding.hrStepsGraphContainer.visibility = android.view.View.GONE
+        }
 
         // TalkBack
         val hours = overviewData.rangeToDisplay
