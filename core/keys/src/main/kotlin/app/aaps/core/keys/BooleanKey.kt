@@ -75,6 +75,9 @@ enum class BooleanKey(
     ApsBoostNightModeDisableWithCob("boost_night_mode_disable_with_cob", false, defaultedBySM = true),
     ApsBoostNightModeDisableWithLowTt("boost_night_mode_disable_with_low_tt", false, defaultedBySM = true),
     ApsBoostBypassVersionCheck("boost_bypass_version_check", false, defaultedBySM = true),
+    ApsBoostPostExerciseRecoveryEnabled("boost_post_exercise_recovery_enabled", false, defaultedBySM = true),
+    ApsBoostHrIntegrationEnabled("boost_hr_integration_enabled", false, defaultedBySM = true),
+    ApsBoostHrStressDetection("boost_hr_stress_detection", false, defaultedBySM = true),
 
     MaintenanceEnableFabric("enable_fabric2", true, defaultedBySM = true, hideParentScreenIfHidden = true),
 
