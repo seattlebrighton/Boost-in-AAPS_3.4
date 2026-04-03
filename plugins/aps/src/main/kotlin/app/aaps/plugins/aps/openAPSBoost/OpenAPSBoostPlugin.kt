@@ -37,8 +37,12 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.profiling.Profiler
 import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.rx.AapsSchedulers
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventAPSCalculationFinished
+import app.aaps.core.interfaces.rx.events.EventCalibrationDetected
+import io.reactivex.rxjava3.disposables.CompositeDisposable
+import io.reactivex.rxjava3.kotlin.plusAssign
 import app.aaps.core.interfaces.stats.TddCalculator
 import app.aaps.core.interfaces.ui.UiInteraction
 import app.aaps.core.interfaces.utils.DateUtil
@@ -86,6 +90,7 @@ import kotlin.math.min
 @Singleton
 open class OpenAPSBoostPlugin @Inject constructor(
     aapsLogger: AAPSLogger,
+    private val aapsSchedulers: AapsSchedulers,
     private val rxBus: RxBus,
     private val constraintsChecker: ConstraintsChecker,
     rh: ResourceHelper,
@@ -124,6 +129,26 @@ open class OpenAPSBoostPlugin @Inject constructor(
     override var lastAPSRun: Long = 0
     override val algorithm = APSResult.Algorithm.BOOST
     override var lastAPSResult: APSResult? = null
+
+    // ---- Calibration SMB block ----
+    private val disposable = CompositeDisposable()
+    @Volatile private var calibrationBlockedUntil: Long = 0L
+
+    override fun onStart() {
+        super.onStart()
+        disposable += rxBus
+            .toObservable(EventCalibrationDetected::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({
+                calibrationBlockedUntil = dateUtil.now() + 15 * 60_000L
+                aapsLogger.debug(LTag.APS, "Boost SMB block set: calibration detected, blocked until ${dateUtil.dateAndTimeString(calibrationBlockedUntil)}")
+            }, { aapsLogger.error(LTag.APS, "EventCalibrationDetected error", it) })
+    }
+
+    override fun onStop() {
+        disposable.clear()
+        super.onStop()
+    }
 
     // ---- Boost-specific preference getters ----
 
@@ -550,7 +575,12 @@ open class OpenAPSBoostPlugin @Inject constructor(
         val iobArray = iobCobCalculator.calculateIobArrayForSMB(autosensResult, SMBDefaults.exercise_mode, SMBDefaults.half_basal_exercise_target, isTempTarget)
         val mealData = iobCobCalculator.getMealDataWithWaitingForCalculationFinish()
         val profilePercent = if (profile is ProfileSealed.EPS) profile.value.originalPercentage else 100
-        val microBolusAllowed = constraintsChecker.isSMBModeEnabled(ConstraintObject(tempBasalFallback.not(), aapsLogger)).also { inputConstraints.copyReasons(it) }.value()
+        val microBolusAllowedByConstraints = constraintsChecker.isSMBModeEnabled(ConstraintObject(tempBasalFallback.not(), aapsLogger)).also { inputConstraints.copyReasons(it) }.value()
+        val microBolusAllowed = if (dateUtil.now() < calibrationBlockedUntil) {
+            val remainingMin = (calibrationBlockedUntil - dateUtil.now()) / 60_000
+            aapsLogger.debug(LTag.APS, "Boost SMB blocked: calibration detected ${remainingMin}min ago, ${15 - remainingMin}min elapsed of 15")
+            false
+        } else microBolusAllowedByConstraints
         val flatBGsDetected = bgQualityCheck.state == BgQualityCheck.State.FLAT
 
         // ---- Boost-specific calculations ----
@@ -585,7 +615,22 @@ open class OpenAPSBoostPlugin @Inject constructor(
             adjusted
         } else pump.baseBasalRate
 
-        // 6. Step counts
+        // 6. Recent BG nadir + braking signal (for fast-carb detection)
+        val now60MinAgo = System.currentTimeMillis() - 60 * 60 * 1000L
+        val recentBgReadings = persistenceLayer.getBgReadingsDataFromTimeToTime(now60MinAgo, System.currentTimeMillis(), true)
+        val recentLowBG = recentBgReadings.minOfOrNull { it.value }?.toDouble() ?: 999.0
+        // Braking product: max(|delta2| × (delta2 - delta1)) across consecutive triplets
+        // where delta2 < 0 (still falling) and delta2 > delta1 (deceleration).
+        // High values indicate rapid carb absorption arresting a fall — fast-carb signal
+        // even when BG never went below the low threshold.
+        val recentBrakingProduct = recentBgReadings.windowed(3).mapNotNull { w ->
+            val delta1 = w[1].value - w[0].value
+            val delta2 = w[2].value - w[1].value
+            val improvement = delta2 - delta1
+            if (delta2 < 0 && improvement > 0) Math.abs(delta2) * improvement else null
+        }.maxOrNull()?.toDouble() ?: 0.0
+
+        // 7. Step counts
         val recentSteps5Min = StepService.getRecentStepCount5Min()
         val recentSteps15Min = StepService.getRecentStepCount15Min()
         val recentSteps30Min = StepService.getRecentStepCount30Min()
@@ -664,6 +709,10 @@ open class OpenAPSBoostPlugin @Inject constructor(
             recentSteps15Minutes = recentSteps15Min,
             recentSteps30Minutes = recentSteps30Min,
             recentSteps60Minutes = recentSteps60Min,
+
+            // Fast-carb rebound detection
+            recentLowBG = recentLowBG,
+            recentBrakingProduct = recentBrakingProduct,
 
             // Debug context
             boostDebugReason = activityResult.debugReason,
@@ -811,7 +860,7 @@ open class OpenAPSBoostPlugin @Inject constructor(
         // Check BG vs profile target + offset
         val profile = profileFunction.getProfile() ?: return false
         val profileTarget = profile.getTargetMgdl()
-        val bgOffset = profileUtil.convertToMgdlDetect(preferences.get(UnitDoubleKey.ApsBoostNightModeBgOffset))
+        val bgOffset = profileUtil.convertToMgdl(preferences.get(UnitDoubleKey.ApsBoostNightModeBgOffset), profileUtil.units)
         return bgCurrent < profileTarget + bgOffset
     }
 

@@ -2,6 +2,8 @@
 
 * Check the wiki: https://wiki.aaps.app
 * Everyone who's been looping with AndroidAPS needs to fill out the form after 3 days of looping https://docs.google.com/forms/d/14KcMjlINPMJHVt28MDRupa4sz4DDIooI4SrW0P3HSN8/viewform?c=0&w=1
+* **Boost Tuning Guide:** https://tim2000s.github.io/Boost-in-AAPS_3.4/boost_tuning_guide.html
+* **Boost Simulator:** https://tim2000s.github.io/Boost-in-AAPS_3.4/boost_simulator.html
 
 [![Support Server](https://img.shields.io/discord/629952586895851530.svg?label=Discord&logo=Discord&colorB=7289da&style=for-the-badge)](https://discord.gg/aUzQ8q5zQd)
 
@@ -20,6 +22,35 @@ This release also includes a **new Boost Overview UI** — a redesigned home scr
 ---
 
 ## What's new in this release?
+
+### Fast-Carb Rebound Protection
+
+When fast-acting carbohydrates are eaten to treat a low (a rescue carb event), the subsequent glucose rise can look identical to an unannounced meal from the algorithm's perspective — rapid rise, no COB entry, high UAM boost factors. Without a logged carb entry, Boost would previously fire its aggressive UAM and acceleration tiers during this recovery, risking insulin stacking onto what is actually a carb-driven rebound.
+
+This release adds fast-carb rebound detection to both Boost and Boost V2. Each loop cycle, AAPS computes the minimum CGM reading over the last 60 minutes (`recentLowBG`) and passes it to the dosing algorithm. If the following conditions are all true simultaneously, the algorithm concludes a fast-carb rescue rebound is in progress:
+
+- `recentLowBG` was below 100 mg/dL (BG was in low-normal range within the last hour)
+- No carbs are currently logged (`mealCOB = 0`)
+- Current BG is below 170 mg/dL (still in the recovery zone, not a true hyperglycaemic rise)
+- `delta_accl` is above 25 (glucose acceleration is sharp — consistent with fast-carb absorption)
+
+When this pattern is detected, **Tier 3 (UAM Boost), Tier 5 (Percent Scale), and Tier 6 (Acceleration Bolus)** are bypassed. The algorithm falls through to **Tier 7 (Enhanced oref1)** instead, which provides a modest proportional response appropriate for a recovering glucose rather than an aggressive boost.
+
+**What this means in practice:** after eating fast carbs without logging them, the algorithm will still deliver insulin if the glucose rises above target — it just won't multiply it up using the UAM/acceleration logic that was calibrated for unannounced meals from a normal baseline. Once BG has been above 100 mg/dL for a full 60 minutes, `recentLowBG` will rise above the threshold and normal boost behaviour resumes automatically.
+
+**How the detection works:**
+
+Two signals are used — either is sufficient, with `delta_accl > 25` and `COB = 0` required in both cases:
+
+- **`recentLowBG < 100 mg/dL`** — BG was in low-normal territory within the last 60 minutes (the typical pre-treatment state). This covers the common scenario of eating fast carbs to treat or prevent a low.
+
+- **`reversalScore > 30`** — computed as `delta × |longAvgDelta|` when `longAvgDelta < 0` and `delta > 0`. This captures fast carbs eaten from a falling high BG where the long-term average still reflects the preceding fall — even if BG never dropped below 100 mg/dL. When the long average is essentially flat (±2 mg/dL), the score equals approximately `delta × 2`, requiring a delta above 15 mg/dL/5min to fire — appropriately conservative for a near-flat trend.
+
+This combination was validated against a labelled dataset of 21 events (12 fast-carb, 9 meal): it correctly identified 12/12 fast-carb events (with corrected per-cycle lookback). The 3–4 false positives were all unlogged meals eaten after a low — cases the algorithm cannot distinguish from fast-carb rebounds, but where the clinical consequence (Tier 7 giving a modest dose instead of Tier 3) is lower-risk than the alternative.
+
+This protection applies to both the **Boost** and **Boost V2** plugins.
+
+---
 
 ### Boostv2 Plugin using DynISF V2
 
@@ -219,7 +250,7 @@ Both Boost and Boost V2 use the percent scale value to increase the early bolus 
 
 If **Boost Scale Value** is less than 3, Boost is enabled.
 
-The short and long average delta clauses disable boost once delta and the average deltas are aligned. There is a preferences setting (Boost Bolus Cap) that limits the maximum bolus that can be delivered by Boost outside of the standard UAMSMBBasalMinutes limit.
+The short and long average delta clauses disable boost once delta and the average deltas are aligned. There is a preferences setting (Boost Bolus Cap) that limits the maximum bolus that can be delivered by Boost outside of the standard max minutes of basal to limit SMB to for UAM limit.
 
 ### High Boost (UAM High Boost)
 
@@ -279,7 +310,8 @@ Start with the same settings as Boost V1. Because the V2 formula amplifies TDD c
 * *Boost Bolus Cap* — Start at 2.5% of TDD and increase to no more than 15% of 7 day average total daily dose.
 * *Percent scale factor* — Once you are familiar with the percentage scale factor, the values can be increased up to 500% with associated increase in hypo risk with rises that are not linked to food.
 * *UAM Boost max IOB* — Start at 5% of TDD and be aware that max IOB is a safety feature, and higher values create greater risk of hypo.
-* *UAMSMBBasalMinutes* — 20 mins. This is only used overnight when IOB is large enough to trigger UAM, so it doesn't need to be a large value.
+* *Max Minutes of basal to limit SMB to* — 15 mins. This controls the maximum SMB size when Boost is not active. 15 mins is recommended; higher values allow larger SMBs outside Boost hours.
+* *Max minutes of basal to limit SMB to for UAM* — 20 mins. This is only used overnight when IOB is large enough to trigger UAM, so it doesn't need to be a large value.
 * *Boost insulin required percent* — Recommended not to exceed 75%. Start at 50% and increase as necessary.
 * *Target* — Set a target of 120 mg/dl (6.5 mmol/l) to get started with Boost or Boost V2. This provides a cushion as you adjust settings. Values below 100 mg/dl (5.5 mmol/l) are not recommended.
 

@@ -1,6 +1,7 @@
 package app.aaps.plugins.main.general.overview.boost
 
 import app.aaps.core.interfaces.aps.Loop
+import app.aaps.core.interfaces.aps.RT
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.stats.TddCalculator
@@ -50,6 +51,7 @@ class BoostOverviewHelper @Inject constructor(
         val scriptDebugText: String = "",
         val cannulaAgeDays: Double = -1.0,
         val sensorAgeDays: Double = -1.0,
+        val fastCarbProtection: Boolean = false,
     )
 
     enum class BoostTier(val label: String, val colorHex: Long) {
@@ -158,6 +160,9 @@ class BoostOverviewHelper @Inject constructor(
         // Autosens ratio
         val autosensRatio = request?.autosensResult?.ratio ?: 1.0
 
+        // Fast-carb protection state — read directly from RT if available
+        val fastCarbProtection = (request as? RT)?.fastCarbProtection ?: false
+
         // Try to parse TDD from scriptDebug (Boost may write "TDD: 48.3" or similar)
         val tddFromDebug = parseTddFromText(allText)
 
@@ -176,7 +181,8 @@ class BoostOverviewHelper @Inject constructor(
             deltaAccl = deltaAccl, variableSens = variableSens,
             scriptDebugText = debugText,
             cannulaAgeDays = getAgeDays(TE.Type.CANNULA_CHANGE),
-            sensorAgeDays = getAgeDays(TE.Type.SENSOR_CHANGE)
+            sensorAgeDays = getAgeDays(TE.Type.SENSOR_CHANGE),
+            fastCarbProtection = fastCarbProtection ?: false,
         )
     }
 

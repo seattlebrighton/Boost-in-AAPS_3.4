@@ -33,6 +33,9 @@ import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.pump.BolusProgressData
+import app.aaps.core.interfaces.pump.WarnColors
+import app.aaps.core.data.model.TE
+import app.aaps.core.keys.IntKey
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
@@ -40,8 +43,10 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventAcceptOpenLoopChange
 import app.aaps.core.interfaces.rx.events.EventBucketedDataCreated
 import app.aaps.core.interfaces.rx.events.EventEffectiveProfileSwitchChanged
+import app.aaps.core.interfaces.rx.events.EventExtendedBolusChange
 import app.aaps.core.interfaces.rx.events.EventNewOpenLoopNotification
 import app.aaps.core.interfaces.rx.events.EventInitializationChanged
+import app.aaps.core.interfaces.rx.events.EventTempBasalChange
 import app.aaps.core.interfaces.rx.events.EventRunningModeChange
 import app.aaps.core.interfaces.rx.events.EventPreferenceChange
 import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
@@ -52,6 +57,7 @@ import app.aaps.core.interfaces.rx.events.EventWearUpdateTiles
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewCalcProgress
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewGraph
 import app.aaps.core.interfaces.rx.events.EventUpdateOverviewIobCob
+import app.aaps.core.interfaces.rx.events.EventUpdateOverviewSensitivity
 import app.aaps.core.interfaces.source.DexcomBoyda
 import app.aaps.core.interfaces.source.XDripSource
 import app.aaps.core.interfaces.ui.UiInteraction
@@ -126,6 +132,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
     @Inject lateinit var dexcomBoyda: DexcomBoyda
     @Inject lateinit var xDripSource: XDripSource
     @Inject lateinit var uel: UserEntryLogger
+    @Inject lateinit var warnColors: WarnColors
 
     // --- State ---
 
@@ -328,6 +335,19 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                 preferences.put(IntNonKey.RangeToDisplay, it.hours)
                 rxBus.send(EventPreferenceChange(IntNonKey.RangeToDisplay.key))
             }, fabricPrivacy::logException)
+        disposable += rxBus
+            .toObservable(EventTempBasalChange::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
+        disposable += rxBus
+            .toObservable(EventExtendedBolusChange::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
+        disposable += activePlugin.activeOverview.overviewBus
+            .toObservable(EventUpdateOverviewSensitivity::class.java)
+            .debounce(1L, TimeUnit.SECONDS)
+            .observeOn(aapsSchedulers.io)
+            .subscribe({ scheduleUpdateGUI() }, fabricPrivacy::logException)
 
         refreshLoop = Runnable { refreshAll(); handler.postDelayed(refreshLoop, 60_000L) }
         handler.postDelayed(refreshLoop, 60_000L)
@@ -569,6 +589,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             binding.panelIobValue.setTextColor(rh.gac(ctx, app.aaps.core.ui.R.attr.iobColor))
             binding.panelBoostValue.text = boostStatus.tierLabel
             binding.panelBoostValue.setTextColor(boostStatus.tier.colorHex.toInt())
+            binding.panelBoostFastCarb.visibility = if (boostStatus.fastCarbProtection) View.VISIBLE else View.GONE
 
             val dynRaw = boostStatus.dynIsfValue
             val dynDisp = if (dynRaw > 0) {
@@ -580,7 +601,8 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
 
             // TalkBack content descriptions (set on parent panels — the clickable elements)
             binding.panelIob.contentDescription = "Insulin on board: ${String.format(Locale.getDefault(), "%.2f", totalIob)} units. Tap for details"
-            binding.panelBoost.contentDescription = "Boost tier: ${boostStatus.tierLabel}. Tap for details"
+            val fcDesc = if (boostStatus.fastCarbProtection) "Fast carb protection active. " else ""
+            binding.panelBoost.contentDescription = "${fcDesc}Boost tier: ${boostStatus.tierLabel}. Tap for details"
             val unitsStr = if (profileFunction.getUnits() == GlucoseUnit.MGDL) "mg/dL per unit" else "mmol/L per unit"
             binding.panelDynisf.contentDescription = "Dynamic ISF: $dynDisp $unitsStr. Tap for details"
         }
@@ -627,16 +649,36 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             val maxReading = pump.pumpDescription.maxResorvoirReading.toDouble()
             if (pump.pumpDescription.isPatchPump && res >= maxReading) {
                 binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(maxReading)}+U"
+                binding.pumpReservoir.setTextColor(rh.gac(context, app.aaps.core.ui.R.attr.defaultTextColor))
             } else if (res > 0) {
                 binding.pumpReservoir.text = "${decimalFormatter.to0Decimal(res)}U"
+                warnColors.setColorInverse(binding.pumpReservoir, res,
+                    preferences.get(IntKey.OverviewResWarning), preferences.get(IntKey.OverviewResCritical))
             } else {
                 binding.pumpReservoir.text = "---"
+                binding.pumpReservoir.setTextColor(rh.gac(context, app.aaps.core.ui.R.attr.defaultTextColor))
             }
             val bat = pump.batteryLevel
             binding.pumpBattery.text = if (bat != null) "\uD83D\uDD0B ${bat}%" else "\uD83D\uDD0B ---"
             val cStr = formatAgeDaysHours(boostStatus.cannulaAgeDays)
             val sStr = formatAgeDaysHours(boostStatus.sensorAgeDays)
-            binding.pumpAges.text = "\uD83E\uDE79 $cStr  \uD83D\uDCE1 $sStr"
+            binding.pumpCannulaAge.text = "\uD83E\uDE79 $cStr"
+            binding.pumpSensorAge.text = "\uD83D\uDCE1 $sStr"
+            // Apply warning/critical colours matching the standard status lights
+            val cannulaTE = persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.CANNULA_CHANGE)
+            val sensorTE = persistenceLayer.getLastTherapyRecordUpToNow(TE.Type.SENSOR_CHANGE)
+            if (cannulaTE != null) {
+                warnColors.setColorByAge(binding.pumpCannulaAge, cannulaTE,
+                    preferences.get(IntKey.OverviewCageWarning), preferences.get(IntKey.OverviewCageCritical))
+            } else {
+                binding.pumpCannulaAge.setTextColor(rh.gac(context, app.aaps.core.ui.R.attr.defaultTextColor))
+            }
+            if (sensorTE != null) {
+                warnColors.setColorByAge(binding.pumpSensorAge, sensorTE,
+                    preferences.get(IntKey.OverviewSageWarning), preferences.get(IntKey.OverviewSageCritical))
+            } else {
+                binding.pumpSensorAge.setTextColor(rh.gac(context, app.aaps.core.ui.R.attr.defaultTextColor))
+            }
 
             // TalkBack — set on container; mark children as not individually important
             val resDesc = if (pump.pumpDescription.isPatchPump && res >= maxReading) {
@@ -774,6 +816,24 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
         iobGraphData.addNowLine(dateUtil.now())
         iobGraphData.formatAxis(overviewData.fromTime, overviewData.endTime)
         iobGraphData.performUpdate()
+
+        // HR / Steps graph — dedicated third graph, shown only when HR or Steps enabled in chart menu
+        val hrStepsSettings = menuChartSettings.getOrNull(1)
+        val showHr = hrStepsSettings?.get(OverviewMenus.CharType.HR.ordinal) == true
+        val showSteps = hrStepsSettings?.get(OverviewMenus.CharType.STEPS.ordinal) == true
+        if (showHr || showSteps) {
+            binding.hrStepsGraphContainer.visibility = android.view.View.VISIBLE
+            val hrGraphData = graphDataProvider.get().with(binding.hrStepsGraph, overviewData)
+            val useHrForScale = showHr && !showSteps
+            val useStepsForScale = showSteps
+            if (showHr) hrGraphData.addHeartRate(useHrForScale, if (useHrForScale) 1.0 else 0.8)
+            if (showSteps) hrGraphData.addSteps(useStepsForScale, if (useStepsForScale) 1.0 else 0.8)
+            hrGraphData.addNowLine(dateUtil.now())
+            hrGraphData.formatAxis(overviewData.fromTime, overviewData.endTime)
+            hrGraphData.performUpdate()
+        } else {
+            binding.hrStepsGraphContainer.visibility = android.view.View.GONE
+        }
 
         // TalkBack
         val hours = overviewData.rangeToDisplay
@@ -922,8 +982,9 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                 // Boost detail panels
                 R.id.panel_boost -> {
                     val bs = lastBoostStatus
+                    val fcLine = if (bs.fastCarbProtection) "⚠️ Fast Carb Protection active — UAM/Accel tiers suppressed\n\n" else ""
                     OKDialog.show(a, "Boost Decision",
-                        "Current tier: ${bs.tierLabel}\n\nReason: ${bs.tierReason}\n\nDelta accel: ${String.format("%.1f", bs.deltaAccl)}")
+                        "${fcLine}Current tier: ${bs.tierLabel}\n\nReason: ${bs.tierReason}\n\nDelta accel: ${String.format("%.1f", bs.deltaAccl)}")
                 }
                 R.id.panel_dynisf -> {
                     val bs = lastBoostStatus

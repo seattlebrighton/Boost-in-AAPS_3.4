@@ -56,15 +56,9 @@ object StepService : SensorEventListener {
         return if (stepsMap.contains(now)) stepsMap.getValue(now) else 0
     }
 
-    fun getRecentStepCount10Min(): Int {
-        val tenMinAgo = currentTimeIn5Min() - 2
-        return if (stepsMap.contains(tenMinAgo)) stepsMap.getValue(tenMinAgo) else 0
-    }
+    fun getRecentStepCount10Min(): Int = getStepsInLastXMin(3)
 
-    fun getRecentStepCount15Min(): Int {
-        val fifteenMinAgo = currentTimeIn5Min() - 3
-        return if (stepsMap.contains(fifteenMinAgo)) stepsMap.getValue(fifteenMinAgo) else 0
-    }
+    fun getRecentStepCount15Min(): Int = getStepsInLastXMin(4)
 
     fun getRecentStepCount30Min(): Int {
         return getStepsInLastXMin(6)

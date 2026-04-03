@@ -1071,6 +1071,40 @@ class DetermineBasalBoost @Inject constructor(
                 val uamBoost1 = if (abs(glucose_status.shortAvgDelta) > 0.001) glucose_status.delta / glucose_status.shortAvgDelta else 0.0
                 val uamBoost2 = if (abs(glucose_status.longAvgDelta) > 0.001) abs(glucose_status.delta / glucose_status.longAvgDelta) else 0.0
 
+                // Fast-carb rebound detection:
+                // If BG was genuinely low (< 72) within the last 60 min and is now rising fast
+                // with no logged carbs, this is likely a fast-carb rescue response.
+                // UAM/Acceleration tiers would fire aggressively here (uamBoost2 inflated by
+                // the recent fall), risking insulin stacking onto an unannounced carb rise.
+                // Suppress Tiers 3, 5, 6 and let Tier 7 (mild) handle it instead.
+                // Two detection signals, either sufficient (COB=0, delta_accl>25 required for both):
+                // 1. recentLowBG < 100: BG was in low-normal range within the last 60 min —
+                //    covers fast carbs eaten from or near target (the common treatment scenario).
+                // 2. reversalScore > 30: delta × |longAvgDelta| when longAvgDelta<0 and delta>0 —
+                //    captures fast carbs eaten from a falling high BG where the long average still
+                //    reflects the preceding fall. Fires even if BG never dropped below 100.
+                //    With flat longAvgDelta (±2 mg/dL) reversalScore ≈ delta×2, so requires
+                //    delta > 15 to exceed threshold — appropriately conservative.
+                // Validated: 12/12 fast-carb recall (corrected lookback), 3–4 meal FPs (unlogged).
+                val lowTriggered      = profile.recentLowBG < 100.0
+                val reversalScore     = if (glucose_status.longAvgDelta < 0 && glucose_status.delta > 0)
+                    glucose_status.delta * Math.abs(glucose_status.longAvgDelta) else 0.0
+                val reversalTriggered = reversalScore > 30.0
+                val fastCarbRebound   = (lowTriggered || reversalTriggered)
+                    && meal_data.mealCOB == 0.0
+                    && bg < 170.0
+                    && delta_accl > 25.0
+                rT.fastCarbProtection = fastCarbRebound
+                if (fastCarbRebound) {
+                    val trigger = when {
+                        lowTriggered && reversalTriggered -> "low ${round(profile.recentLowBG, 0)} rev ${round(reversalScore, 0)}"
+                        lowTriggered      -> "low ${round(profile.recentLowBG, 0)}"
+                        else              -> "rev ${round(reversalScore, 0)}"
+                    }
+                    consoleError.add("Fast-carb rebound detected ($trigger, accl ${round(delta_accl, 1)}): BG=$bg — UAM/Accel boost suppressed")
+                    rT.reason.append("Fast-carb rebound ($trigger→$bg): boost suppressed; ")
+                }
+
                 val boostMaxIOB = profile.boost_maxIOB
                 val boost_max = profile.boost_bolus
                 val boost_scale = profile.boost_scale * (profileSwitch / 100.0)
@@ -1116,7 +1150,7 @@ class DetermineBasalBoost @Inject constructor(
                     consoleError.add("Insulin required % (${(1.0 / insulinReqPCT) * 100}%) applied.")
                 }
                 // ----- Tier 3: UAM Boost (strong acceleration with positive delta) -----
-                else if (glucose_status.delta >= 5 && glucose_status.shortAvgDelta >= 3 && uamBoost1 > 1.2 && uamBoost2 > 2 && boostActive && iob_data.iob < boostMaxIOB && boost_scale < 3 && eventualBG > target_bg && bg > 80 && insulinReq > 0) {
+                else if (!fastCarbRebound && glucose_status.delta >= 5 && glucose_status.shortAvgDelta >= 3 && uamBoost1 > 1.2 && uamBoost2 > 2 && boostActive && iob_data.iob < boostMaxIOB && boost_scale < 3 && eventualBG > target_bg && bg > 80 && insulinReq > 0) {
                     consoleError.add(">>> TIER 3: UAM Boost <<<")
                     rT.boostTier = "UAM_BOOST"
                     consoleError.add("Insulin required pre-boost is $insulinReq")
@@ -1156,7 +1190,7 @@ class DetermineBasalBoost @Inject constructor(
                     consoleError.add("UAM High Boost enacted; SMB equals $boostInsulinReq; Original insulin requirement was $insulinReq")
                 }
                 // ----- Tier 5: Percent scale (BG 98-180, delta > 3, accelerating) -----
-                else if (bg > 98 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
+                else if (!fastCarbRebound && bg > 98 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
                     consoleError.add(">>> TIER 5: Percent Scale <<<")
                     rT.boostTier = "PERCENT_SCALE"
                     if (insulinReq > boostMaxIOB - iob_data.iob) {
@@ -1173,7 +1207,7 @@ class DetermineBasalBoost @Inject constructor(
                     consoleError.add("Post percent scale trigger state: $iTimeActive")
                 }
                 // ----- Tier 6: Acceleration bolus (delta_accl > 25) -----
-                else if (delta_accl > 25 && glucose_status.delta > 4 && iob_data.iob < boostMaxIOB && boostActive && eventualBG > target_bg) {
+                else if (!fastCarbRebound && delta_accl > 25 && glucose_status.delta > 4 && iob_data.iob < boostMaxIOB && boostActive && eventualBG > target_bg) {
                     consoleError.add(">>> TIER 6: Acceleration Bolus <<<")
                     rT.boostTier = "ACCELERATION"
                     boostInsulinReq = min(boost_scale * boostInsulinReq, boost_max)
