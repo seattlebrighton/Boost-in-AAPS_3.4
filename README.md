@@ -7,7 +7,7 @@
 
 [![Support Server](https://img.shields.io/discord/629952586895851530.svg?label=Discord&logo=Discord&colorB=7289da&style=for-the-badge)](https://discord.gg/aUzQ8q5zQd)
 
-***Boost and Boost V2 based on AAPS 3.4.1.0***
+***Boost and Boost V2 based on AAPS 3.4.2.1***
 
 Boost V2 is a variant of the Boost plugin that uses **Chris Wilson's DynISF V2 formula** for ISF calculation.
 
