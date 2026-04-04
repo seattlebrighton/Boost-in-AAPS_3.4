@@ -1139,7 +1139,6 @@ open class OpenAPSBoostPlugin @Inject constructor(
     override fun addPreferenceScreen(preferenceManager: PreferenceManager, parent: PreferenceScreen, context: Context, requiredKey: String?) {
         if (requiredKey != null &&
             requiredKey != "absorption_smb_advanced" &&
-            requiredKey != "boost_settings" &&
             requiredKey != "boost_default_aaps_settings" &&
             requiredKey != "boost_dynisf_settings" &&
             requiredKey != "boost_exercise_settings" &&
@@ -1155,11 +1154,6 @@ open class OpenAPSBoostPlugin @Inject constructor(
             key = "openapsboost_settings"
             title = rh.gs(R.string.openaps_boost)
             initialExpandedChildrenCount = 0
-
-            addPreference(preferenceManager.createPreferenceScreen(context).apply {
-            key = "boost_settings"
-            title = rh.gs(R.string.openaps_boost)
-            summary = rh.gs(R.string.boost_settings_summary)
 
             // ── 1. Default AAPS Settings ────────────────────────────────
             addPreference(preferenceManager.createPreferenceScreen(context).apply {
@@ -1295,7 +1289,6 @@ open class OpenAPSBoostPlugin @Inject constructor(
                     )
                 )
             })
-            }) // close boost_settings PreferenceScreen
         }
     }
 }
