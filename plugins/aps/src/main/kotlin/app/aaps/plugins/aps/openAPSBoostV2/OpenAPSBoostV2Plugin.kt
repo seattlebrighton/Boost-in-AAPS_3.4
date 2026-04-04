@@ -1126,6 +1126,12 @@ open class OpenAPSBoostV2Plugin @Inject constructor(
         category.apply {
             key = "openapsboostv2_settings"
             title = rh.gs(R.string.openaps_boost_v2)
+            initialExpandedChildrenCount = 0
+
+            addPreference(preferenceManager.createPreferenceScreen(context).apply {
+            key = "boost_settings"
+            title = rh.gs(R.string.openaps_boost_v2)
+            summary = rh.gs(R.string.boost_settings_summary)
 
             // ── 1. Default AAPS Settings ────────────────────────────────
             addPreference(preferenceManager.createPreferenceScreen(context).apply {
@@ -1264,6 +1270,7 @@ open class OpenAPSBoostV2Plugin @Inject constructor(
                     )
                 )
             })
+            }) // close boost_settings PreferenceScreen
         }
     }
 }

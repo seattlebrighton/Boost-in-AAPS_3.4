@@ -100,6 +100,7 @@
     <string name="boost_settings_boost_controls">Boost Controls</string>
     <string name="boost_settings_exercise">Exercise Settings</string>
     <string name="boost_settings_safety">Safety Settings</string>
+    <string name="boost_settings_summary">AAPS defaults, Boost controls, Dynamic ISF, Exercise, Night Mode, Safety, Advanced</string>
 
     <!-- Boost BG Source Safety -->
     <string name="boost_allow_all_bg_sources_title">Allow all BG sources for SMBs</string>
