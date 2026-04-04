@@ -1223,8 +1223,9 @@ class DetermineBasalBoost @Inject constructor(
                     }
                     consoleError.add("UAM High Boost enacted; SMB equals $boostInsulinReq; Original insulin requirement was $insulinReq")
                 }
-                // ----- Tier 5: Percent scale (BG 98-180, delta > 3, accelerating) -----
-                else if (bg > 98 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
+                // ----- Tier 5: Percent scale (BG 110-180, delta > 3, accelerating) -----
+                // Lower bound raised from 98 to 110: data shows 57% hypo rate when T5 fires at BG 90-110.
+                else if (bg > 110 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
                     consoleError.add(">>> TIER 5: Percent Scale <<<")
                     rT.boostTier = "PERCENT_SCALE"
                     if (insulinReq > boostMaxIOB - iob_data.iob) {
