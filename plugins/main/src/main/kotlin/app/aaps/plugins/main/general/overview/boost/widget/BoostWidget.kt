@@ -11,8 +11,10 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
+import android.util.TypedValue
 import android.widget.RemoteViews
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.interfaces.aps.Loop
@@ -109,6 +111,11 @@ class BoostWidget : AppWidgetProvider() {
     override fun onEnabled(context: Context) {}
     override fun onDisabled(context: Context) {}
 
+    override fun onAppWidgetOptionsChanged(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int, newOptions: Bundle?) {
+        (context.applicationContext as HasAndroidInjector).androidInjector().inject(this)
+        updateAppWidget(context, appWidgetManager, appWidgetId)
+    }
+
     private fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
         val views = RemoteViews(context.packageName, R.layout.boost_widget_layout)
         val alpha = preferences.get(IntComposedKey.WidgetOpacity, appWidgetId)
@@ -121,9 +128,17 @@ class BoostWidget : AppWidgetProvider() {
         if (config.APS || useBlack)
             views.setInt(R.id.boost_widget_layout, "setBackgroundColor", Color.argb(alpha, 0, 0, 0))
 
+        // Compute text sizes based on actual widget dimensions
+        val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
+        val widthDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250)
+        val heightDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 110)
+        val sizes = computeTextSizes(widthDp, heightDp)
+
+        applyTextSizes(views, sizes)
+
         handler.post {
             if (config.appInitialized) {
-                updateBgBobble(views, context)
+                updateBgBobble(views, context, heightDp)
                 updateBoostData(views)
                 updateTarget(views)
                 updateIob(views)
@@ -132,11 +147,47 @@ class BoostWidget : AppWidgetProvider() {
         }
     }
 
+    /** Scale text sizes proportionally to widget dimensions. */
+    private fun computeTextSizes(widthDp: Int, heightDp: Int): TextSizes {
+        // Base sizes at 250x110dp (3x2 widget). Scale from there.
+        val widthScale = widthDp / 250f
+        val heightScale = heightDp / 110f
+        val scale = minOf(widthScale, heightScale).coerceIn(0.8f, 2.5f)
+
+        return TextSizes(
+            label = (11f * scale).coerceIn(9f, 16f),
+            value = (16f * scale).coerceIn(12f, 30f),
+            tier = (14f * scale).coerceIn(12f, 24f),
+            timeAgo = (11f * scale).coerceIn(9f, 16f)
+        )
+    }
+
+    private data class TextSizes(val label: Float, val value: Float, val tier: Float, val timeAgo: Float)
+
+    private fun applyTextSizes(views: RemoteViews, s: TextSizes) {
+        // Tier + time ago
+        views.setTextViewTextSize(R.id.tier_label, TypedValue.COMPLEX_UNIT_SP, s.tier)
+        views.setTextViewTextSize(R.id.time_ago, TypedValue.COMPLEX_UNIT_SP, s.timeAgo)
+
+        // Value fields
+        val valueIds = intArrayOf(R.id.dynisf, R.id.tdd, R.id.iob, R.id.activity_mode, R.id.profile_pct, R.id.temp_target)
+        for (id in valueIds) {
+            views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_SP, s.value)
+        }
+
+        // Label fields
+        val labelIds = intArrayOf(R.id.label_dynisf, R.id.label_tdd, R.id.label_iob, R.id.label_activity, R.id.label_profile, R.id.label_target)
+        for (id in labelIds) {
+            views.setTextViewTextSize(id, TypedValue.COMPLEX_UNIT_SP, s.label)
+        }
+    }
+
     /** Render BG bobble as a high-res bitmap that fills the left panel. */
-    private fun updateBgBobble(views: RemoteViews, context: Context) {
+    private fun updateBgBobble(views: RemoteViews, context: Context, heightDp: Int) {
         val density = context.resources.displayMetrics.density
-        // Render at 160dp — scales down smoothly via fitCenter in the ImageView
-        val sizePx = (160 * density).toInt()
+        // Scale bobble to ~80% of widget height, min 100dp, max 240dp
+        val bobbleDp = (heightDp * 0.8f).coerceIn(100f, 240f)
+        val sizePx = (bobbleDp * density).toInt()
         val bgMgdl = lastBgData.lastBg()?.recalculated ?: 0.0
         val bgText = lastBgData.lastBg()?.let { profileUtil.fromMgdlToStringInUnits(it.recalculated) } ?: "---"
         val isActual = lastBgData.isActualBg()

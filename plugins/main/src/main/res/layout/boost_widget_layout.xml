@@ -84,6 +84,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/label_dynisf"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="DynISF"
@@ -120,6 +121,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/label_tdd"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="TDD"
@@ -167,6 +169,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/label_iob"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="IOB"
@@ -203,6 +206,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/label_activity"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Activity"
@@ -251,6 +255,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/label_profile"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Profile"
@@ -287,6 +292,7 @@
                 android:orientation="vertical">
 
                 <TextView
+                    android:id="@+id/label_target"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Target"
