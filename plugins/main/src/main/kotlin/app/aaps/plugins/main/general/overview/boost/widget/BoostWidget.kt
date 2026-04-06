@@ -334,7 +334,8 @@ class BoostWidget : AppWidgetProvider() {
             )
         } else {
             profileFunction.getProfile()?.let { profile ->
-                val targetUsed = loop.lastRun?.constraintsProcessed?.targetBG ?: 0.0
+                val targetUsed = loop.lastRun?.constraintsProcessed?.targetBG
+                    ?: boostOverviewHelper.getBoostStatus().targetBgMgdl
                 if (targetUsed != 0.0 && abs(profile.getTargetMgdl() - targetUsed) > 0.01) {
                     views.setTextViewText(R.id.temp_target, profileUtil.toTargetRangeString(targetUsed, targetUsed, GlucoseUnit.MGDL, units))
                     views.setTextColor(R.id.temp_target, rh.gc(app.aaps.core.ui.R.color.widget_ribbonWarning))
