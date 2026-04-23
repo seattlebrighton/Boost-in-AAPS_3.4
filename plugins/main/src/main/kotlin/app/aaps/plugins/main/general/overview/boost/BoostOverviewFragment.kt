@@ -738,7 +738,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             _binding ?: return@runOnUiThread
             val ctx = context ?: return@runOnUiThread
 
-            binding.panelTddValue.text = if (tddDisplay > 0) String.format("%.1f", tddDisplay) else "---"
+            binding.panelTddValue.text = if (tddDisplay > 0) String.format(Locale.getDefault(), "%.1f", tddDisplay) else "---"
 
             binding.panelTargetValue.text = if (hasTempTarget) "$targetStr ${dateUtil.untilString(tempTarget!!.end, rh)}" else targetStr
             binding.panelTargetValue.setTextColor(
@@ -759,7 +759,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
             binding.panelActivityValue.setTextColor(actColor)
 
             // TalkBack content descriptions
-            val tddStr = if (tddDisplay > 0) String.format("%.1f units", tddDisplay) else "unavailable"
+            val tddStr = if (tddDisplay > 0) String.format(Locale.getDefault(), "%.1f units", tddDisplay) else "unavailable"
             binding.panelTdd.contentDescription = "Total daily dose: $tddStr. Tap for details"
             val unitsLabel = if (profileFunction.getUnits() == GlucoseUnit.MGDL) "mg/dL" else "mmol/L"
             val targetDesc = when {
@@ -984,7 +984,7 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                     val bs = lastBoostStatus
                     val fcLine = if (bs.fastCarbProtection) "⚠️ Fast Carb Protection active — UAM/Accel tiers suppressed\n\n" else ""
                     OKDialog.show(a, "Boost Decision",
-                        "${fcLine}Current tier: ${bs.tierLabel}\n\nReason: ${bs.tierReason}\n\nDelta accel: ${String.format("%.1f", bs.deltaAccl)}")
+                        "${fcLine}Current tier: ${bs.tierLabel}\n\nReason: ${bs.tierReason}\n\nDelta accel: ${String.format(Locale.getDefault(), "%.1f", bs.deltaAccl)}")
                 }
                 R.id.panel_dynisf -> {
                     val bs = lastBoostStatus
@@ -997,10 +997,10 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                     details.append("\n\nAlgorithm inputs:")
                     val bgConverted = if (bs.lastBg > 0) profileUtil.fromMgdlToStringInUnits(bs.lastBg) else "---"
                     details.append("\n  BG: $bgConverted $unitsStr")
-                    details.append("\n  TDD (weighted): ${if (bs.tddWeighted > 0) String.format("%.1f", bs.tddWeighted) else "---"}")
+                    details.append("\n  TDD (weighted): ${if (bs.tddWeighted > 0) String.format(Locale.getDefault(), "%.1f", bs.tddWeighted) else "---"}")
                     if (bs.insulinDivisor > 0) details.append("\n  Insulin divisor: ${bs.insulinDivisor}")
-                    details.append("\n\nTDD 7d avg: ${String.format("%.1f", bs.tdd7d)}")
-                    details.append("\nTDD 24h: ${String.format("%.1f", bs.tdd24h)}")
+                    details.append("\n\nTDD 7d avg: ${String.format(Locale.getDefault(), "%.1f", bs.tdd7d)}")
+                    details.append("\nTDD 24h: ${String.format(Locale.getDefault(), "%.1f", bs.tdd24h)}")
                     OKDialog.show(a, "Dynamic ISF", details.toString())
                 }
                 R.id.panel_profile -> {
@@ -1010,17 +1010,17 @@ class BoostOverviewFragment : DaggerFragment(), View.OnClickListener, View.OnLon
                     val bi = iobCobCalculator.calculateIobFromBolus().round()
                     val ba = iobCobCalculator.calculateIobFromTempBasalsIncludingConvertedExtended().round()
                     OKDialog.show(a, rh.gs(app.aaps.core.ui.R.string.iob),
-                        "Total: ${String.format("%.2f", bi.iob + ba.basaliob)}U\nBolus: ${String.format("%.2f", bi.iob)}U\nBasal: ${String.format("%.2f", ba.basaliob)}U")
+                        "Total: ${String.format(Locale.getDefault(), "%.2f", bi.iob + ba.basaliob)}U\nBolus: ${String.format(Locale.getDefault(), "%.2f", bi.iob)}U\nBasal: ${String.format(Locale.getDefault(), "%.2f", ba.basaliob)}U")
                 }
 
                 // Second row panels
                 R.id.panel_tdd -> {
                     val bs = lastBoostStatus
                     OKDialog.show(a, "Total Daily Dose",
-                        "oapsProfile.TDD: ${if (bs.tddWeighted > 0) String.format("%.1f", bs.tddWeighted) else "(not set)"}\n" +
-                            "TDD from debug: ${if (bs.tddFromDebug > 0) String.format("%.1f", bs.tddFromDebug) else "(not found)"}\n" +
-                            "TDD 7d avg: ${String.format("%.1f", bs.tdd7d)}\n" +
-                            "TDD 24h: ${String.format("%.1f", bs.tdd24h)}\n\n" +
+                        "oapsProfile.TDD: ${if (bs.tddWeighted > 0) String.format(Locale.getDefault(), "%.1f", bs.tddWeighted) else "(not set)"}\n" +
+                            "TDD from debug: ${if (bs.tddFromDebug > 0) String.format(Locale.getDefault(), "%.1f", bs.tddFromDebug) else "(not found)"}\n" +
+                            "TDD 7d avg: ${String.format(Locale.getDefault(), "%.1f", bs.tdd7d)}\n" +
+                            "TDD 24h: ${String.format(Locale.getDefault(), "%.1f", bs.tdd24h)}\n\n" +
                             "--- Script Debug ---\n${bs.scriptDebugText.ifEmpty { "(no debug output)" }}")
                 }
                 R.id.panel_target -> {

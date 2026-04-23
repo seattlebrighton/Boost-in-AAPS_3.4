@@ -1292,8 +1292,8 @@ function calcAll(inp) {
         microBolus = Math.floor(Math.min(boostInsReq, inp.bolusMax) * R) / R;
       }
     }
-    // Tier 5: Percent Scale (BG 98-181, delta > 3, any acceleration)
-    else if (inp.bg > 98 && inp.bg < 181 && inp.delta > 3
+    // Tier 5: Percent Scale (BG 110-181, delta > 3, any acceleration)
+    else if (inp.bg > 110 && inp.bg < 181 && inp.delta > 3
         && delta_accl > 0 && eventualBG > inp.target && inp.iob < boostMaxIOB && boostActive) {
       tier = 'T5_PERCENT_SCALE';
       let insReq = insulinReqV1;
@@ -1906,7 +1906,7 @@ function drawSmbChart(inp, r) {
       if (r.fastCarbRebound) smb = Math.floor(smb * r.fastCarbScale * RC) / RC;
     } else if (r.delta_accl > 5 && bg > 180 && inp.iob < inp.maxIob && eventBG > inp.target && bg > 80) {
       smb = Math.floor(Math.min(Math.min(boost_scale_chart*effectiveBasal_chart,inp.bolusMax), inp.bolusMax) * RC) / RC;
-    } else if (bg > 98 && bg < 181 && inp.delta > 3 && r.delta_accl > 0 && eventBG > inp.target && inp.iob < inp.maxIob) {
+    } else if (bg > 110 && bg < 181 && inp.delta > 3 && r.delta_accl > 0 && eventBG > inp.target && inp.iob < inp.maxIob) {
       smb = Math.floor(Math.min(insulinReq/scaledDiv, inp.bolusMax) * RC) / RC;
       if (r.fastCarbRebound) smb = Math.floor(smb * r.fastCarbScale * RC) / RC;
     } else if (r.delta_accl > 25 && inp.delta > 4 && inp.iob < inp.maxIob && eventBG > inp.target) {

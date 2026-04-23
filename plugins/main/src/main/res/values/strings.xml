@@ -329,4 +329,10 @@
     <string name="steps_shortname">STEPS</string>
     <string name="simple_mode_enabled">Simple mode enabled</string>
 
+    <!-- Boost Widget -->
+    <string name="boost_widget_description">Boost algorithm widget</string>
+    <string name="boost_widget_configuration">Boost Widget Configuration</string>
+    <string name="boost_widget_configure_opacity">Configure opacity</string>
+    <string name="boost_widget_use_black">Use black color</string>
+
 </resources>

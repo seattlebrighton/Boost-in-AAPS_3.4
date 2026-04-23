@@ -176,12 +176,28 @@ class DetermineBasalBoost @Inject constructor(
     ): RT {
         consoleError.clear()
         consoleLog.clear()
+        // Even on the early-bailout path (invalid BG / stale data) we want the
+        // Boost-specific markers present in the Nightscout upload so downstream
+        // analysis can distinguish "field genuinely missing" from "decision skipped
+        // before the algorithm got that far". We set the markers that are honestly
+        // known at this point and leave the numerics null for fields the algorithm
+        // never computed.
         var rT = RT(
             algorithm = APSResult.Algorithm.BOOST,
             runningDynamicIsf = true, // Boost always uses dynamic ISF
             timestamp = currentTime,
             consoleLog = consoleLog,
-            consoleError = consoleError
+            consoleError = consoleError,
+            // Boost markers — emitted even on the early-return path
+            boostActive = profile.boostActive,
+            boostProfileSwitch = profile.profileSwitch,
+            boostTier = "NONE",
+            fastCarbProtection = false,
+            insulinReqPctEffective = 0.0,
+            // Numerics that the plugin already pre-computed before determine_basal
+            sensNormalTarget = if (profile.sensNormalTarget > 0) round(profile.sensNormalTarget, 1) else null,
+            predictionISF = if (profile.variable_sens > 0) round(profile.variable_sens, 1) else null,
+            tdd = if (profile.TDD > 0) round(profile.TDD, 1) else null
         )
 
         val deliverAt = currentTime
@@ -485,14 +501,26 @@ class DetermineBasalBoost @Inject constructor(
             consoleLog = consoleLog,
             consoleError = consoleError,
             variable_sens = sens,
-            // Boost/DynISF fields for Nightscout upload
+            // Boost/DynISF fields for Nightscout upload — every field below is
+            // emitted on every decision so the downstream analysis pipeline can
+            // count records uniformly and detect "neutral" states explicitly.
             boostActive = profile.boostActive,
             predictionISF = round(profile.variable_sens, 1),
             sensNormalTarget = round(profile.sensNormalTarget, 1),
             tdd = if (profile.TDD > 0) round(profile.TDD, 1) else null,
-            tddRatio = if (sensitivityRatio != null && sensitivityRatio != 1.0) sensitivityRatio else null,
+            // tddRatio: emit even when neutral (1.0). Previously skipped via
+            // `if (sensitivityRatio != null && sensitivityRatio != 1.0) ... else null`,
+            // which made the field present in only ~60% of records.
+            tddRatio = sensitivityRatio,
             deltaAcceleration = delta_accl,
-            boostProfileSwitch = if (profile.profileSwitch != 100) profile.profileSwitch else null
+            // boostProfileSwitch: emit on every decision, including 100% (no override).
+            // Previously emitted only when != 100 which made it present in ~30% of records.
+            boostProfileSwitch = profile.profileSwitch,
+            // Initial defaults for fields populated later in the SMB block — these
+            // ensure the field is always present even when SMB isn't allowed.
+            boostTier = "NONE",
+            fastCarbProtection = false,
+            insulinReqPctEffective = 0.0
         )
 
         // =====================================================================
@@ -1223,8 +1251,9 @@ class DetermineBasalBoost @Inject constructor(
                     }
                     consoleError.add("UAM High Boost enacted; SMB equals $boostInsulinReq; Original insulin requirement was $insulinReq")
                 }
-                // ----- Tier 5: Percent scale (BG 98-180, delta > 3, accelerating) -----
-                else if (bg > 98 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
+                // ----- Tier 5: Percent scale (BG 110-180, delta > 3, accelerating) -----
+                // Lower bound raised from 98 to 110: data shows 57% hypo rate when T5 fires at BG 90-110.
+                else if (bg > 110 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
                     consoleError.add(">>> TIER 5: Percent Scale <<<")
                     rT.boostTier = "PERCENT_SCALE"
                     if (insulinReq > boostMaxIOB - iob_data.iob) {
@@ -1247,7 +1276,7 @@ class DetermineBasalBoost @Inject constructor(
                     consoleError.add("Post percent scale trigger state: $iTimeActive")
                 }
                 // ----- Tier 6: Acceleration bolus (delta_accl > 25) -----
-                else if (delta_accl > 25 && glucose_status.delta > 4 && iob_data.iob < boostMaxIOB && boostActive && eventualBG > target_bg) {
+                else if (delta_accl > 25 && glucose_status.delta > 4 && bg > 110 && iob_data.iob < boostMaxIOB && boostActive && eventualBG > target_bg) {
                     consoleError.add(">>> TIER 6: Acceleration Bolus <<<")
                     rT.boostTier = "ACCELERATION"
                     boostInsulinReq = min(boost_scale * boostInsulinReq, boost_max)

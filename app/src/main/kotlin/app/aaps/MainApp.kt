@@ -63,6 +63,7 @@ import app.aaps.receivers.ChargingStateReceiver
 import app.aaps.receivers.KeepAliveWorker
 import app.aaps.receivers.TimeDateOrTZChangeReceiver
 import app.aaps.ui.activityMonitor.ActivityMonitor
+import app.aaps.plugins.main.general.overview.boost.widget.BoostWidget
 import app.aaps.ui.widget.Widget
 import app.aaps.utils.configureLeakCanary
 import com.google.firebase.Firebase
@@ -193,6 +194,7 @@ class MainApp : DaggerApplication() {
         refreshWidget = Runnable {
             handler.postDelayed(refreshWidget, 60000)
             Widget.updateWidget(this@MainApp, "ScheduleEveryMin")
+            BoostWidget.updateWidget(this@MainApp, "ScheduleEveryMin")
         }
         handler.postDelayed(refreshWidget, 60000)
         config.appInitialized = true

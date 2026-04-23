@@ -1,4 +1,4 @@
-package app.aaps.plugins.aps.openAPSBoostV2
+package app.aaps.plugins.aps.openAPSBoostV3
 
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.interfaces.aps.APSResult
@@ -24,7 +24,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 @Singleton
-class DetermineBasalBoostV2 @Inject constructor(
+class DetermineBasalBoostV3 @Inject constructor(
     private val profileUtil: ProfileUtil
 ) {
 
@@ -54,11 +54,8 @@ class DetermineBasalBoostV2 @Inject constructor(
         profileUtil.fromMgdlToStringInUnits(value).replace("-0.0", "0.0")
 
     // =====================================================================
-    // Boost V2: Dynamic ISF calculation per BG level
-    // Chris Wilson DynISF V2: ISF = 2300 / (ln(BG/insulinDivisor + 1) · TDD² · 0.02)
-    // sensNormalTarget is pre-computed in the plugin using the V2 formula
-    // with all adjustments (globalScale, sensRatio, TT). Here we just scale
-    // by the BG ratio — equivalent to velocity=1.0 (no dampening).
+    // Boost-specific: Dynamic ISF calculation per BG level
+    // Replaces the TDD-based ln formula with the Boost getIsfByProfile approach
     // =====================================================================
     fun getIsfByProfile(bg: Double, profile: OapsProfileBoost, useCap: Boolean): Double {
         var bgAdj = bg
@@ -66,10 +63,9 @@ class DetermineBasalBoostV2 @Inject constructor(
             val cap = profile.dynISFBgCap
             if (bgAdj > cap) bgAdj = cap + (bgAdj - cap) / 3.0
         }
-        val sensBG = ln((bgAdj / profile.insulinDivisor) + 1.0)
-        if (sensBG <= 0) return profile.sensNormalTarget  // safety guard
-        val scaler = ln((profile.normalTarget / profile.insulinDivisor) + 1.0) / sensBG
-        return profile.sensNormalTarget * scaler
+        val sensBG = ln((bgAdj / profile.insulinDivisor) + 1)
+        val scaler = ln((profile.normalTarget / profile.insulinDivisor) + 1) / sensBG
+        return profile.sensNormalTarget * (1 - (1 - scaler) * profile.dynISFvelocity)
     }
 
     // =====================================================================
@@ -253,8 +249,12 @@ class DetermineBasalBoostV2 @Inject constructor(
         // Boost-specific: Delta acceleration calculation
         // =====================================================================
         val shortAvgDelta = glucose_status.shortAvgDelta
+        // Floor the denominator at 2.0 mg/dL/5min to prevent division-by-near-zero
+        // amplification when BG is flat or slowly changing. Without this, shortAvgDelta
+        // of -0.3 with delta 0.0 would produce delta_accl of 100% — an artifact, not
+        // genuine acceleration.
         val delta_accl = if (abs(shortAvgDelta) > 0.001)
-            round(100.0 * (glucose_status.delta - shortAvgDelta) / abs(shortAvgDelta), 2)
+            round(100.0 * (glucose_status.delta - shortAvgDelta) / max(abs(shortAvgDelta), 2.0), 2)
         else 0.0
 
         var iTimeActive = false
@@ -263,7 +263,7 @@ class DetermineBasalBoostV2 @Inject constructor(
         // Boost Dynamic ISF for predictions
         // =====================================================================
         consoleError.add("═════════════════════════════════════════════════════════")
-        consoleError.add("  Boost V2 (Chris Wilson DynISF V2) | Profile: ${profile.profileSwitch}%")
+        consoleError.add("  Boost V3 (DynISF V3) | Profile: ${profile.profileSwitch}%")
         consoleError.add("═════════════════════════════════════════════════════════")
         consoleError.add("Steps: 5m=${profile.recentSteps5Minutes} 15m=${profile.recentSteps15Minutes} 30m=${profile.recentSteps30Minutes} 60m=${profile.recentSteps60Minutes}")
 
@@ -286,9 +286,9 @@ class DetermineBasalBoostV2 @Inject constructor(
         // ── ISF ──
         consoleError.add("── ISF ─────────────────────────────────────")
         consoleError.add("Profile sens: ${round(profile.sens, 1)} | Variable sens: ${round(profile.variable_sens, 1)} | sensNormalTarget: ${round(profile.sensNormalTarget, 1)}")
-        consoleError.add("DynISF V2: normalTarget=${convert_bg(profile.normalTarget)} | bgCap=${convert_bg(profile.dynISFBgCap)} | bgCapped=${profile.dynISFBgCapped}")
-        if (profile.TDD > 0) consoleError.add("TDD: ${round(profile.TDD, 1)} | ISF from V2 formula: 2300/(ln·TDD²·0.02)")
-        else consoleError.add("TDD: not available — V2 requires TDD (using profile ISF fallback)")
+        consoleError.add("DynISF: normalTarget=${convert_bg(profile.normalTarget)} | velocity=${profile.dynISFvelocity} | bgCap=${convert_bg(profile.dynISFBgCap)} | bgCapped=${profile.dynISFBgCapped}")
+        if (profile.TDD > 0) consoleError.add("TDD: ${round(profile.TDD, 1)} | ISF from TDD formula")
+        else consoleError.add("TDD: not used (profile ISF)")
 
         // ISF calculation reasoning from plugin
         if (profile.isfDebugReason.isNotEmpty()) {
@@ -1122,10 +1122,34 @@ class DetermineBasalBoostV2 @Inject constructor(
                 val reversalScore     = if (glucose_status.longAvgDelta < 0 && glucose_status.delta > 0)
                     glucose_status.delta * Math.abs(glucose_status.longAvgDelta) else 0.0
                 val reversalTriggered = reversalScore > 30.0
-                val fastCarbRebound   = (lowTriggered || reversalTriggered)
+
+                // Graduated fast-carb rebound protection
+                // Instead of binary suppress/release, scale the response proportionally with BG.
+                // fastCarbScale: 1.0 = full tier response (no suppression), 0.0 = maximum suppression.
+                // Below BG 120: strong suppression (scale 0.3 — still allows ~30% of tier bolus).
+                // BG 120–170: linear ramp from 0.3 → 1.0 as BG moves further from target.
+                // Above BG 170: no suppression (full tier response).
+                // Velocity override: if delta > 15 and BG already above target+20, this is a genuine
+                // spike not a gentle recovery — release protection immediately.
+                val fastCarbConditions = (lowTriggered || reversalTriggered)
                     && meal_data.mealCOB == 0.0
-                    && bg < 170.0
                     && delta_accl > 25.0
+                var fastCarbScale = 1.0
+                val fastCarbRebound: Boolean
+                if (fastCarbConditions && bg < 170.0) {
+                    // Velocity override: extreme rise well above target is a genuine spike
+                    if (glucose_status.delta > 15 && bg > target_bg + 20) {
+                        fastCarbScale = 1.0
+                        fastCarbRebound = false
+                        consoleError.add("Fast-carb conditions met but velocity override: delta ${round(glucose_status.delta, 1)} > 15, BG $bg > target+20 — treating as genuine spike")
+                    } else {
+                        fastCarbScale = if (bg < 120.0) 0.3
+                                        else 0.3 + 0.7 * (bg - 120.0) / 50.0
+                        fastCarbRebound = true
+                    }
+                } else {
+                    fastCarbRebound = false
+                }
                 rT.fastCarbProtection = fastCarbRebound
                 if (fastCarbRebound) {
                     val trigger = when {
@@ -1133,8 +1157,8 @@ class DetermineBasalBoostV2 @Inject constructor(
                         lowTriggered      -> "low ${round(profile.recentLowBG, 0)}"
                         else              -> "rev ${round(reversalScore, 0)}"
                     }
-                    consoleError.add("Fast-carb rebound detected ($trigger, accl ${round(delta_accl, 1)}): BG=$bg — UAM/Accel boost suppressed")
-                    rT.reason.append("Fast-carb rebound ($trigger→$bg): boost suppressed; ")
+                    consoleError.add("Fast-carb rebound ($trigger, accl ${round(delta_accl, 1)}): BG=$bg — scale ${round(fastCarbScale * 100, 0)}%")
+                    rT.reason.append("Fast-carb rebound ($trigger→$bg): scale ${round(fastCarbScale * 100, 0)}%; ")
                 }
 
                 val boostMaxIOB = profile.boost_maxIOB
@@ -1182,7 +1206,7 @@ class DetermineBasalBoostV2 @Inject constructor(
                     consoleError.add("Insulin required % (${(1.0 / insulinReqPCT) * 100}%) applied.")
                 }
                 // ----- Tier 3: UAM Boost (strong acceleration with positive delta) -----
-                else if (!fastCarbRebound && glucose_status.delta >= 5 && glucose_status.shortAvgDelta >= 3 && uamBoost1 > 1.2 && uamBoost2 > 2 && boostActive && iob_data.iob < boostMaxIOB && boost_scale < 3 && eventualBG > target_bg && bg > 80 && insulinReq > 0) {
+                else if (glucose_status.delta >= 5 && glucose_status.shortAvgDelta >= 3 && uamBoost1 > 1.2 && uamBoost2 > 2 && boostActive && iob_data.iob < boostMaxIOB && boost_scale < 3 && eventualBG > target_bg && bg > 80 && insulinReq > 0) {
                     consoleError.add(">>> TIER 3: UAM Boost <<<")
                     rT.boostTier = "UAM_BOOST"
                     consoleError.add("Insulin required pre-boost is $insulinReq")
@@ -1198,6 +1222,12 @@ class DetermineBasalBoostV2 @Inject constructor(
                         rT.reason.append("UAM Boost enacted; SMB equals $microBolus; ")
                     } else {
                         microBolus = Math.floor(min(boostInsulinReq, boost_max) * roundSMBTo) / roundSMBTo
+                    }
+                    // Apply graduated fast-carb scaling
+                    if (fastCarbRebound) {
+                        val preFcSmb = microBolus
+                        microBolus = Math.floor(microBolus * fastCarbScale * roundSMBTo) / roundSMBTo
+                        consoleError.add("Fast-carb scale applied: $preFcSmb → $microBolus (${round(fastCarbScale * 100, 0)}%)")
                     }
                     iTimeActive = true
                     consoleError.add("UAM Boost enacted; SMB equals $boostInsulinReq; Original insulin requirement was $insulinReq")
@@ -1222,7 +1252,7 @@ class DetermineBasalBoostV2 @Inject constructor(
                     consoleError.add("UAM High Boost enacted; SMB equals $boostInsulinReq; Original insulin requirement was $insulinReq")
                 }
                 // ----- Tier 5: Percent scale (BG 98-180, delta > 3, accelerating) -----
-                else if (!fastCarbRebound && bg > 110 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
+                else if (bg > 110 && bg < 181 && glucose_status.delta > 3 && delta_accl > 0 && eventualBG > target_bg && iob_data.iob < boostMaxIOB && boostActive) {
                     consoleError.add(">>> TIER 5: Percent Scale <<<")
                     rT.boostTier = "PERCENT_SCALE"
                     if (insulinReq > boostMaxIOB - iob_data.iob) {
@@ -1234,12 +1264,18 @@ class DetermineBasalBoostV2 @Inject constructor(
                         consoleError.add("Increased SMB as insulin required < 0")
                     }
                     microBolus = Math.floor(min(insulinReq / insulinDivisor, boost_max) * roundSMBTo) / roundSMBTo
+                    // Apply graduated fast-carb scaling
+                    if (fastCarbRebound) {
+                        val preFcSmb = microBolus
+                        microBolus = Math.floor(microBolus * fastCarbScale * roundSMBTo) / roundSMBTo
+                        consoleError.add("Fast-carb scale applied: $preFcSmb → $microBolus (${round(fastCarbScale * 100, 0)}%)")
+                    }
                     rT.reason.append("Increased SMB as percentage of insulin required to ${(1.0 / insulinDivisor) * 100}%. SMB is $microBolus; ")
                     iTimeActive = true
                     consoleError.add("Post percent scale trigger state: $iTimeActive")
                 }
                 // ----- Tier 6: Acceleration bolus (delta_accl > 25) -----
-                else if (!fastCarbRebound && delta_accl > 25 && glucose_status.delta > 4 && bg > 110 && iob_data.iob < boostMaxIOB && boostActive && eventualBG > target_bg) {
+                else if (delta_accl > 25 && glucose_status.delta > 4 && bg > 110 && iob_data.iob < boostMaxIOB && boostActive && eventualBG > target_bg) {
                     consoleError.add(">>> TIER 6: Acceleration Bolus <<<")
                     rT.boostTier = "ACCELERATION"
                     boostInsulinReq = min(boost_scale * boostInsulinReq, boost_max)
@@ -1249,6 +1285,12 @@ class DetermineBasalBoostV2 @Inject constructor(
                     insulinDivisor = insulinReqPCT - ((abs(bg - 180) / 72) * (insulinReqPCT - (2 * scale_pct)))
                     insulinReqPCT = insulinDivisor
                     microBolus = Math.floor(min(boostInsulinReq / insulinReqPCT, boost_max) * roundSMBTo) / roundSMBTo
+                    // Apply graduated fast-carb scaling
+                    if (fastCarbRebound) {
+                        val preFcSmb = microBolus
+                        microBolus = Math.floor(microBolus * fastCarbScale * roundSMBTo) / roundSMBTo
+                        consoleError.add("Fast-carb scale applied: $preFcSmb → $microBolus (${round(fastCarbScale * 100, 0)}%)")
+                    }
                     iTimeActive = true
                     consoleError.add("Acceleration bolus triggered; SMB equals $boostInsulinReq")
                     rT.reason.append("Acceleration bolus triggered; SMB equals $boostInsulinReq; ")
@@ -1257,6 +1299,9 @@ class DetermineBasalBoostV2 @Inject constructor(
                 else if (boostActive && glucose_status.delta > 0 && delta_accl >= 0.5) {
                     consoleError.add(">>> TIER 7: Enhanced oref1 <<<")
                     rT.boostTier = "ENHANCED_OREF1"
+                    if (insulinReq > boostMaxIOB - iob_data.iob) {
+                        insulinReq = boostMaxIOB - iob_data.iob
+                    }
                     microBolus = Math.floor(min(insulinReq / insulinReqPCT, boost_max) * roundSMBTo) / roundSMBTo
                     rT.reason.append("Enhanced oref1 triggered; SMB equals $microBolus; ")
                 }
@@ -1266,6 +1311,26 @@ class DetermineBasalBoostV2 @Inject constructor(
                     rT.boostTier = "REGULAR_OREF1"
                     microBolus = Math.floor(min(insulinReq / insulinReqPCT, maxBolus) * roundSMBTo) / roundSMBTo
                     rT.reason.append("Regular oref1 triggered; SMB equals $microBolus; ")
+                }
+
+                // =====================================================================
+                // Spike override: when the basal-derived maxBolus cap is the bottleneck
+                // during a confirmed spike, allow SMB to rise toward boost_max.
+                // Conditions: BG > 180, still rising (delta > 5), insulinReq is at least
+                // 3× the basal-derived cap, and boost is active. This only affects Tier 8
+                // (the only tier capped by maxBolus); Tiers 1-7 already cap to boost_max.
+                // =====================================================================
+                if (boostActive && bg > 180 && glucose_status.delta > 5 && insulinReq > 3 * maxBolus
+                    && microBolus >= maxBolus - profile.bolus_increment && iob_data.iob < boostMaxIOB) {
+                    val spikeOverrideCap = min(boost_max, boostMaxIOB - iob_data.iob)
+                    val overrideBolus = Math.floor(min(insulinReq / insulinReqPCT, spikeOverrideCap) * roundSMBTo) / roundSMBTo
+                    if (overrideBolus > microBolus) {
+                        consoleError.add("── Spike Override ──────────────────────────")
+                        consoleError.add("BG $bg > 180, delta ${round(glucose_status.delta, 1)} > 5, insulinReq ${round(insulinReq, 2)} > 3×maxBolus ${round(maxBolus, 2)}")
+                        consoleError.add("Raising SMB cap from $maxBolus to ${round(spikeOverrideCap, 2)}: $microBolus → $overrideBolus")
+                        rT.reason.append("Spike override: cap raised from $maxBolus to ${round(spikeOverrideCap, 2)}; ")
+                        microBolus = overrideBolus
+                    }
                 }
 
                 // Zero temp calculation for SMB
